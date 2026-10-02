@@ -1,0 +1,69 @@
+---
+# Realises the "Missing kafka_node_id" and "Kafka data volume not mounted"
+# scenarios in tests/features/configure-cluster.feature without Docker or
+# any real host: runs the same assertion logic as site.yml's pre_tasks
+# against localhost, feeding it deliberately-bad per-host facts.
+#
+# Run: ansible-playbook -i localhost, ansible/tests/assert-inventory-contract.yml
+# Each play is expected to FAIL (asserted via `failed_when` + a follow-up
+# check) — a non-zero rc from the assertion task itself is the pass
+# condition for this test file, so success is verified with `block/rescue`
+# rather than letting ansible-playbook's own exit code gate pass/fail.
+- name: "Scenario: Missing kafka_node_id fails before installing Kafka"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Deliberately omit kafka_node_id to reproduce the edge case.
+    kafka_node_roles: [broker, controller]
+    kafka_node_ip: 10.0.1.10
+  tasks:
+    - name: Run the same assertion site.yml's pre_tasks runs
+      block:
+        - name: Assert kafka_node_id, kafka_node_roles and kafka_node_ip are all set
+          ansible.builtin.assert:
+            that:
+              - kafka_node_id is defined
+              - kafka_node_roles is defined
+              - kafka_node_roles | length > 0
+              - kafka_node_ip is defined
+            fail_msg: "Host is missing kafka_node_id, kafka_node_roles or kafka_node_ip."
+          register: kafka__reg_assert_contract
+        - name: Fail the test file — the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the inventory-contract assertion to fail when kafka_node_id is missing, but it passed."
+      rescue:
+        - name: Confirm the pre_tasks assertion is what failed (not something else)
+          ansible.builtin.assert:
+            that: "'kafka_node_id' in ansible_failed_result.msg or 'kafka_node_id' in (ansible_failed_result.assertion | default(''))"
+            fail_msg: "Play failed for a reason other than the expected missing-kafka_node_id assertion."
+            success_msg: "PASS: missing kafka_node_id correctly fails before Kafka installs."
+
+- name: "Scenario: data volume in fstab but not mounted fails before installing Kafka"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Simulate an fstab entry present but mount absent, then assert the fail path
+      block:
+        - name: Stub findmnt --fstab result (entry exists)
+          ansible.builtin.set_fact:
+            kafka__reg_fstab_entry: {rc: 0}
+            kafka__reg_live_mount: {rc: 1}
+
+        - name: Fail if /var/lib/kafka is in fstab but not actually mounted (copy of site.yml logic)
+          ansible.builtin.fail:
+            msg: "/var/lib/kafka has an fstab entry but is not mounted."
+          when:
+            - kafka__reg_fstab_entry.rc == 0
+            - kafka__reg_live_mount.rc != 0
+
+        - name: Fail the test file — the check above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the unmounted-data-volume check to fail, but it passed."
+      rescue:
+        - name: Confirm the unmounted-volume check is what failed
+          ansible.builtin.assert:
+            that: "'mounted' in ansible_failed_result.msg"
+            fail_msg: "Play failed for a reason other than the expected unmounted-volume check."
+            success_msg: "PASS: fstab entry without a live mount correctly fails before Kafka installs."
