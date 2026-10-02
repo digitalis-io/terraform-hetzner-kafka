@@ -114,11 +114,9 @@ variable "ssh_public_keys" {
   }
 }
 
-# tflint-ignore: terraform_unused_declarations
 variable "ssh_allowed_cidrs" {
-  # TODO(#7): consumed by the hcloud_firewall SSH rule.
   type        = list(string)
-  description = "Source CIDRs allowed to reach SSH (22/tcp) on public interfaces. Empty means no public inbound TCP rule. 0.0.0.0/0 and ::/0 are rejected."
+  description = "Source CIDRs allowed to reach SSH (22/tcp) on public interfaces. Empty means no public inbound TCP rule. Prefixes shorter than /8 (IPv4) or /32 (IPv6), including 0.0.0.0/0 and ::/0, are rejected."
   default     = []
 
   validation {
@@ -127,9 +125,18 @@ variable "ssh_allowed_cidrs" {
   }
 
   validation {
-    condition     = alltrue([for c in var.ssh_allowed_cidrs : !can(regex("/0$", c))])
-    error_message = "ssh_allowed_cidrs must not contain 0.0.0.0/0, ::/0 or any other /0 range."
+    condition = alltrue([
+      for c in var.ssh_allowed_cidrs :
+      can(tonumber(split("/", c)[1])) && try(tonumber(split("/", c)[1]) >= (strcontains(c, ":") ? 32 : 8), false)
+    ])
+    error_message = "ssh_allowed_cidrs prefixes must be /8 or longer (IPv4) and /32 or longer (IPv6); 0.0.0.0/0, ::/0 and split ranges such as 0.0.0.0/1 are rejected."
   }
+}
+
+variable "allow_icmp" {
+  type        = bool
+  description = "When true, allow inbound ICMP (ping) from ssh_allowed_cidrs on public interfaces. Has no effect when ssh_allowed_cidrs is empty."
+  default     = true
 }
 
 variable "network_cidr" {

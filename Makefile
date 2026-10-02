@@ -134,6 +134,6 @@ module-test: ## Run native tofu test suites for the module (plan-only, mocked pr
 fmt: ## Format all .tf files
 	@$(TOFU_BIN) fmt -recursive
 
-docs: ## Generate module README with terraform-docs
+docs: ## Inject inputs/outputs into module README with terraform-docs
 	@[ "$(TERRAFORM_DOCS)" ] || { echo "terraform-docs not found"; exit 1; }
-	@$(TERRAFORM_DOCS) markdown table . > README.md
+	@$(TERRAFORM_DOCS) markdown table --output-file README.md --output-mode inject $(MODULE_DIR)

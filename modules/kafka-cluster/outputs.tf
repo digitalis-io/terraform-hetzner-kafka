@@ -26,3 +26,18 @@ output "nodes" {
     error_message = "At least one SSH key is required: set ssh_key_names or ssh_public_keys."
   }
 }
+
+output "network_id" {
+  description = "ID of the Hetzner private network (hcloud_network)."
+  value       = hcloud_network.this.id
+}
+
+output "subnet_id" {
+  description = "ID of the node subnet (hcloud_network_subnet), formatted as NETWORK_ID-IP_RANGE."
+  value       = hcloud_network_subnet.this.id
+}
+
+output "firewall_id" {
+  description = "ID of the public-interface firewall. Pass to hcloud_server.firewall_ids to apply it."
+  value       = hcloud_firewall.this.id
+}

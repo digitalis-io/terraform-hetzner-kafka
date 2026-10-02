@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Added
+- `kafka-cluster`: private `hcloud_network` (`<name>-net`) and `cloud` subnet; public `hcloud_firewall` (`<name>-fw`) allowing 22/tcp and optional ICMP (`allow_icmp`, default `true`) from `ssh_allowed_cidrs` only, never 9092/9093; outputs `network_id`, `subnet_id`, `firewall_id` (#7)
+- `network_firewall.tftest.hcl` suite and Gherkin specs; first terraform-compliance feature `network_firewall_policy.feature` (no Kafka ports, no `/0` sources, cloud subnet, `managed-by` labels) (#7)
 - `modules/kafka-cluster` skeleton: pinned `hetznercloud/hcloud ~> 1.69`, validated inputs, `nodes` map (combined or dedicated KRaft controllers) and `nodes` output (#6)
 - Native `tofu test` suites and Gherkin specifications for the node map and input validation (#6)
 - `make module-test` and CI `module-test` job; terraform-compliance skips `@tofu-test` features (#6)
