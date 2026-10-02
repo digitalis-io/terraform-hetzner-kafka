@@ -2,8 +2,8 @@
 
 Builds a KRaft Apache Kafka cluster on Hetzner Cloud. Current scope: validated
 inputs, the `nodes` map, the private network/subnet, an SSH-only public
-firewall, SSH keys, spread placement groups and one server per node. Data
-volumes and the Ansible inventory are added by later tickets.
+firewall, SSH keys, spread placement groups, one server per node and the
+Ansible inventory. Data volumes are added by a later ticket.
 
 ## Usage
 
@@ -99,6 +99,64 @@ Network and firewall carry the `labels` input plus `cluster = <name>` and
 - `ssh_key_names` is read from the Hetzner API during plan, so `plan` needs
   `HCLOUD_TOKEN` with read access even for `-refresh=false` plans.
 
+## Ansible inventory
+
+Output `inventory` is a YAML Ansible inventory for the `axonops.axonops`
+`kafka` role (ADR-0002). It has no secrets: keep credentials in Ansible Vault.
+Write it to disk in the root module and run Ansible as a separate step:
+
+```hcl
+resource "local_file" "inventory" {
+  content         = module.kafka.inventory
+  filename        = "${path.root}/inventory.yml"
+  file_permission = "0644"
+}
+```
+
+Rendered for `name = "kafka-dev"`, `broker_count = 3` (combined mode; trimmed
+to one host):
+
+```yaml
+"kafka":
+  "children":
+    "kafka_brokers":
+      "hosts":
+        "kafka-dev-broker-1": {}
+    "kafka_controllers":
+      "hosts":
+        "kafka-dev-broker-1": {}
+  "hosts":
+    "kafka-dev-broker-1":
+      "ansible_host": "198.51.100.11"
+      "ansible_user": "root"
+      "kafka_node_id": 1
+      "kafka_node_ip": "10.0.1.10"
+      "kafka_node_roles":
+      - "broker"
+      - "controller"
+  "vars":
+    "kafka_axonops_cluster_name": "kafka-dev"
+```
+
+| Key | Value |
+|-----|-------|
+| host name | server name, `<name>-<key>` |
+| `ansible_host` | public IPv4 (SSH) |
+| `ansible_user` | `root` |
+| `kafka_node_id` | KRaft `node.id` from `nodes` |
+| `kafka_node_roles` | KRaft `process.roles`, e.g. `[broker, controller]` |
+| `kafka_node_ip` | private IP; Kafka advertises it (never the public IP) |
+| `kafka_axonops_cluster_name` | group var, `var.name` |
+| `kafka_brokers` / `kafka_controllers` | child groups by KRaft role, for `--limit` and controller-first restarts. The role builds its own groups from `kafka_node_roles` and does not need them |
+
+The YAML is produced with `yamlencode()`, so it is always valid and keys are
+sorted (stable diffs). Changing the schema is a breaking change.
+
+Output `bootstrap_servers` is a comma-separated `<private_ip>:9092` list of
+every node with the broker role, ordered by node ID, e.g.
+`10.0.1.20:9092,10.0.1.21:9092,10.0.1.22:9092` in dedicated mode. It is
+reachable only from the private network.
+
 ## Validation
 
 | Rule | Where |
@@ -123,8 +181,10 @@ tofu init -backend=false
 tofu test
 ```
 
-Or `make module-test` from the repository root. Plan-only, mocked `hcloud`
-provider, no credentials needed. Gherkin specifications
+Or `make module-test` from the repository root. Mocked `hcloud` provider, no
+credentials needed. Runs are plan-only except `inventory.tftest.hcl`, which
+applies against the mock (public IPv4s are unknown at plan); nothing real is
+created. Gherkin specifications
 live in `tests/compliance/features/`: files tagged `@tofu-test` are realised by
 these suites; `network_firewall_policy.feature` and `servers_policy.feature`
 run under terraform-compliance against a plan JSON (`make test`).
@@ -185,7 +245,9 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_bootstrap_servers"></a> [bootstrap\_servers](#output\_bootstrap\_servers) | Comma-separated Kafka bootstrap servers (<private\_ip>:9092) of every node with the broker role, ordered by node ID. Reachable from the private network only. |
 | <a name="output_firewall_id"></a> [firewall\_id](#output\_firewall\_id) | ID of the public-interface firewall. Pass to hcloud\_server.firewall\_ids to apply it. |
+| <a name="output_inventory"></a> [inventory](#output\_inventory) | Ansible YAML inventory (ADR-0002): group kafka with one host per server (ansible\_host = public IPv4, ansible\_user = root, kafka\_node\_id, kafka\_node\_roles, kafka\_node\_ip = private IP), group var kafka\_axonops\_cluster\_name, and child groups kafka\_brokers / kafka\_controllers. Contains no secrets. |
 | <a name="output_network_id"></a> [network\_id](#output\_network\_id) | ID of the Hetzner private network (hcloud\_network). |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Map of node key (broker-<n>, controller-<n>) to node attributes: role, node\_id, kafka\_roles, server\_type, private\_ip, has\_volume, labels. |
 | <a name="output_placement_group_ids"></a> [placement\_group\_ids](#output\_placement\_group\_ids) | Map of pool (broker, controller) to spread placement group ID. controller is present only when dedicated\_controllers = true. |
