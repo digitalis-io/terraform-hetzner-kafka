@@ -13,8 +13,8 @@ SHELL           := /bin/bash
 #   LOCATION     Hetzner location, default fsn1 (fsn1, nbg1, hel1, ash, hil, sin)
 #   TF_DIR       OpenTofu root to run in, default examples/complete
 #   HCLOUD_TOKEN (required, env only) Hetzner Cloud API token
-#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (env only) Object Storage creds
-#                for the S3 backend (ADR-0006)
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (env only) Object Storage creds,
+#                only when the optional S3 backend is enabled (ADR-0007)
 #
 # Variables passed to the root module: -var=location=$(LOCATION)
 # and -var=environment=$(ENVIRONMENT). The root in TF_DIR must declare both.
@@ -78,14 +78,16 @@ check-dirs: check-env
 force-init:
 	@if [ $(FORCE) -gt 0 ]; then rm -rf "$(TF_DIR)/.terraform"; fi
 
-prep: check-dirs force-init ## Initialise S3 backend (Hetzner Object Storage)
-	@[ -f "$(BACKEND_CONFIG)" ] || { printf '\033[0;31m$(BACKEND_CONFIG) not found (copy backend.hcl.example)\033[0m\n'; exit 1; }
+prep: check-dirs force-init ## Initialise OpenTofu (local state, or S3 when enabled in backend.tf)
 	@rm -f "$(COMPLIANCE_OVERRIDE)"
-	@$(TOFU) init \
-		-reconfigure \
-		-backend=true \
-		-backend-config="$(abspath $(BACKEND_CONFIG))" \
-		-input=false
+	@if grep -Eq '^[[:space:]]*backend[[:space:]]+"s3"' "$(TF_DIR)/backend.tf" 2>/dev/null; then \
+		[ -f "$(BACKEND_CONFIG)" ] || { printf '\033[0;31mS3 backend enabled in $(TF_DIR)/backend.tf but $(BACKEND_CONFIG) not found (copy backend.hcl.example)\033[0m\n'; exit 1; }; \
+		echo "State: S3 backend ($(BACKEND_CONFIG))"; \
+		$(TOFU) init -reconfigure -backend=true -backend-config="$(abspath $(BACKEND_CONFIG))" -input=false; \
+	else \
+		echo "State: local ($(TF_DIR)/terraform.tfstate). Remote state is recommended, see README."; \
+		$(TOFU) init -input=false; \
+	fi
 
 plan: prep ## Show what will change (exit 0/2 = ok, 1 = error)
 	@echo "Using vars from $(VARS)"

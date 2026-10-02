@@ -40,7 +40,7 @@ blank VM.
 | **Hardware failure isolation** | Brokers and controllers sit in Hetzner *spread* placement groups, so no two share a physical host |
 | **Your choice of topology** | Combined broker+controller nodes for small clusters, or a dedicated 3/5-node controller quorum with up to 10 brokers |
 | **Data that survives a rebuild** | Optional delete-protected Hetzner volumes per broker, formatted and mounted automatically, never reformatted |
-| **Infrastructure you can review** | Plain OpenTofu and Ansible, remote state on Hetzner Object Storage, validated inputs, and policy tests (terraform-compliance, `tofu test`, ansible-lint, molecule) in CI |
+| **Infrastructure you can review** | Plain OpenTofu and Ansible, optional remote state on Hetzner Object Storage, validated inputs, and policy tests (terraform-compliance, `tofu test`, ansible-lint, molecule) in CI |
 | **Built on the AxonOps toolchain** | Configured with the [`axonops.axonops`](https://github.com/axonops/axonops-ansible-collection) collection, which also installs the [AxonOps](https://axonops.com) agent for Kafka monitoring and management (switched on in a coming release) |
 
 ## How it works
@@ -89,19 +89,17 @@ Clients connect over the Hetzner private network. Design notes:
 
 ## Quick start
 
-Requirements: OpenTofu >= 1.10, GNU Make, Ansible, a
-Hetzner Cloud project and an Object Storage bucket for state.
+Requirements: OpenTofu >= 1.10, GNU Make, Ansible and a Hetzner Cloud
+project. State is local by default; [remote state](#remote-state-recommended)
+is recommended for shared or long-lived clusters.
 
 ```bash
 # 1. Credentials (environment only, never in files)
 export HCLOUD_TOKEN=<hetzner-cloud-api-token>
-export AWS_ACCESS_KEY_ID=<object-storage-access-key>        # S3 state backend
-export AWS_SECRET_ACCESS_KEY=<object-storage-secret-key>
 
-# 2. Parameters: edit bucket/key, your SSH public key and your IP
-cp params/fsn1/dev/backend.hcl.example   params/fsn1/dev/backend.hcl
+# 2. Parameters: your SSH public key and your IP
 cp params/fsn1/dev/params.tfvars.example params/fsn1/dev/params.tfvars
-$EDITOR params/fsn1/dev/backend.hcl params/fsn1/dev/params.tfvars
+$EDITOR params/fsn1/dev/params.tfvars
 
 # 3. Infrastructure (writes inventory.yml in the repo root)
 make plan  ENVIRONMENT=dev LOCATION=fsn1
@@ -191,7 +189,7 @@ OpenTofu targets), `LOCATION` (default `fsn1`), `TF_DIR` (default
 
 | Target | What it does |
 |--------|--------------|
-| `plan` | `tofu init` against the S3 backend, then save a plan to `plan.out` |
+| `plan` | `tofu init` (local state, or S3 when enabled), then save a plan to `plan.out` |
 | `apply` | Apply the saved plan; writes `inventory.yml` |
 | `inventory` | Re-render `inventory.yml` from state (`tofu output -raw inventory`), no apply |
 | `galaxy` | `ansible-galaxy collection install -r ansible/requirements.yml` |
@@ -242,7 +240,7 @@ Environment variables:
 | Variable | Used by | Example |
 |----------|---------|---------|
 | `HCLOUD_TOKEN` | hcloud provider | Hetzner Cloud API token (read/write) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 state backend | Hetzner Object Storage credentials |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Optional S3 state backend | Hetzner Object Storage credentials |
 
 ## Outputs reference
 
@@ -304,12 +302,33 @@ Deleting a volume deletes its Kafka data permanently.
   network can reach Kafka.
 - `inventory.yml` holds IPs and node IDs only. Secrets belong in Ansible Vault.
 
-### State locking
+### Remote state (recommended)
 
-State lives in Hetzner Object Storage via the S3 backend with
-`use_lockfile = true`. Hetzner support for the conditional writes this needs
-is unverified. If `plan` or `apply` fails to acquire the lock, run with
-`LOCK=false` and make sure only one person or pipeline runs at a time:
+By default state is a local file, `examples/complete/terraform.tfstate`. Keep
+it safe: losing it means OpenTofu no longer knows about your servers. For
+anything shared or long-lived, store state remotely, for example in Hetzner
+Object Storage:
+
+```bash
+# 1. Enable the backend: uncomment `backend "s3" {}` in examples/complete/backend.tf
+# 2. Point it at your bucket
+cp params/fsn1/dev/backend.hcl.example params/fsn1/dev/backend.hcl
+$EDITOR params/fsn1/dev/backend.hcl
+# 3. Object Storage credentials, then plan as usual
+export AWS_ACCESS_KEY_ID=<object-storage-access-key>
+export AWS_SECRET_ACCESS_KEY=<object-storage-secret-key>
+make plan ENVIRONMENT=dev
+```
+
+`make prep` uses `backend.hcl` only when the S3 block is active, and fails
+clearly if it is active but `backend.hcl` is missing. Moving existing local
+state: run `tofu -chdir=examples/complete init -migrate-state
+-backend-config=../../params/fsn1/dev/backend.hcl` once.
+
+The example sets `use_lockfile = true`. Hetzner support for the conditional
+writes this needs is unverified. If `plan` or `apply` fails to acquire the
+lock, run with `LOCK=false` and make sure only one person or pipeline runs at
+a time:
 
 ```bash
 make plan apply ENVIRONMENT=dev LOCK=false
