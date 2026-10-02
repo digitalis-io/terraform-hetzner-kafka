@@ -1,6 +1,7 @@
 .EXPORT_ALL_VARIABLES:
 .ONESHELL:
-.PHONY: apply destroy plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test cloud-init-test
+.PHONY: apply destroy check-confirm plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test cloud-init-test \
+        inventory galaxy ping configure smoke-test lint check-inventory check-ansible
 
 # Multi-step recipes are chained on one shell line (&&, ;) so they behave the
 # same under GNU make 3.81 (macOS, no .ONESHELL) and 4.x.
@@ -48,6 +49,18 @@ COMPLIANCE_JSON     = $(abspath $(TF_DIR))/compliance.plan.json
 # (module-test); terraform-compliance (radish tag expression) skips them.
 COMPLIANCE_TAGS     ?= not tofu-test
 MODULE_DIR          ?= modules/kafka-cluster
+# Feature files tagged @tofu-test (tag line, not comments) are excluded.
+TOFU_TEST_TAG_RE     = ^[[:space:]]*@[^\#]*tofu-test
+
+# ---------------------------------------------------------------------------
+# Ansible (ADR-0002). inventory.yml is written to the repo root by
+# local_file.inventory (make apply) or by make inventory.
+# ---------------------------------------------------------------------------
+INVENTORY           ?= inventory.yml
+ANSIBLE_DIR         ?= ansible
+ANSIBLE_CONFIG      ?= $(ANSIBLE_DIR)/ansible.cfg
+ANSIBLE_BIN         := $(shell command -v ansible 2>/dev/null)
+ANSIBLE_OPTS        ?=
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -95,10 +108,14 @@ apply: check-env check-dirs ## Apply the saved plan from make plan (costs money)
 		-input=false \
 		plan.out && rm -f "$(TF_DIR)/plan.out"
 
-destroy: ## Destroy all resources (DANGEROUS, requires CONFIRM=yes)
-	@[ "$(CONFIRM)" = "yes" ] || { printf '\033[0;31mRefusing to destroy: re-run with CONFIRM=yes\033[0m\n'; exit 1; }; \
-	$(MAKE) --no-print-directory prep && \
-	$(TOFU) destroy \
+check-confirm:
+	@[ "$(CONFIRM)" = "yes" ] || { printf '\033[0;31mRefusing to destroy: re-run with CONFIRM=yes\033[0m\n'; exit 1; }
+
+# check-confirm runs before prep (serial prerequisites), so nothing is
+# initialised or destroyed without CONFIRM=yes; no recursive $(MAKE), so
+# `make -n destroy` is a true dry run.
+destroy: check-confirm prep ## Destroy all resources (DANGEROUS, requires CONFIRM=yes)
+	@$(TOFU) destroy \
 		-lock=$(LOCK) \
 		-input=false \
 		-refresh=true \
@@ -113,7 +130,7 @@ force-unlock: prep ## Force-unlock state (TF_FORCE_UNLOCK=<id>)
 test: check-dirs ## Run terraform-compliance against a plan (local backend, -refresh=false)
 	@[ -d "$(FEATURES_DIR)" ] || { printf '\033[0;31m$(FEATURES_DIR) does not exist\033[0m\n'; exit 1; }
 	@[ -n "$(TF_COMPLIANCE)" ] || { printf '\033[0;31mterraform-compliance not found (pip install terraform-compliance)\033[0m\n'; exit 1; }
-	@if ! grep -L '@tofu-test' $(FEATURES_DIR)/*.feature 2>/dev/null | grep -q .; then \
+	@if ! grep -LE '$(TOFU_TEST_TAG_RE)' $(FEATURES_DIR)/*.feature 2>/dev/null | grep -q .; then \
 		echo "No terraform-compliance features (all tagged @tofu-test); skipping"; exit 0; fi; \
 	trap 'rm -f "$(COMPLIANCE_OVERRIDE)"' EXIT; \
 	printf 'terraform {\n  backend "local" {}\n}\n' > "$(COMPLIANCE_OVERRIDE)" && \
@@ -133,6 +150,34 @@ module-test: ## Run native tofu test suites for the module (plan-only, mocked pr
 
 cloud-init-test: ## Test the cloud-init volume mount script with stubbed blkid/mkfs/mount (no root)
 	@sh tests/cloud-init/test_mount_data_volume.sh
+
+inventory: prep ## Re-render inventory.yml from state (tofu output, no apply)
+	@TMP=$$(mktemp) && trap 'rm -f "$$TMP"' EXIT && \
+	$(TOFU) output -raw inventory > "$$TMP" && \
+	[ -s "$$TMP" ] && install -m 0644 "$$TMP" "$(INVENTORY)" && \
+	echo "Wrote $(INVENTORY)"
+
+check-ansible:
+	@[ -n "$(ANSIBLE_BIN)" ] || { printf '\033[0;31mansible not found (pip install ansible-core)\033[0m\n'; exit 1; }
+	@[ -f "$(ANSIBLE_CONFIG)" ] || { printf '\033[0;31m$(ANSIBLE_CONFIG) not found\033[0m\n'; exit 1; }
+
+check-inventory:
+	@[ -s "$(INVENTORY)" ] || { printf '\033[0;31m$(INVENTORY) not found: run make apply or make inventory first\033[0m\n'; exit 1; }
+
+galaxy: check-ansible ## Install Ansible collections from ansible/requirements.yml
+	@ansible-galaxy collection install -r $(ANSIBLE_DIR)/requirements.yml
+
+ping: check-inventory check-ansible ## Check SSH reachability of every Kafka node
+	@ansible -i $(INVENTORY) kafka -m ansible.builtin.ping $(ANSIBLE_OPTS)
+
+configure: check-inventory check-ansible ## Install and configure Kafka (ansible/site.yml)
+	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/site.yml $(ANSIBLE_OPTS)
+
+smoke-test: check-inventory check-ansible ## Produce/consume a test message over the private network
+	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/smoke-test.yml $(ANSIBLE_OPTS)
+
+lint: ## Run every pre-commit hook (fmt, validate, tflint, trivy, docs)
+	@pre-commit run --all-files
 
 fmt: ## Format all .tf files
 	@$(TOFU_BIN) fmt -recursive

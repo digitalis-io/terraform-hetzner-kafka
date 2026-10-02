@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
 - `LOCK` Makefile variable (default `true`); set `LOCK=false` if Object Storage conditional-write locking is unsupported
 
 ### Changed
+- `params/fsn1/dev/params.tfvars.example` sets the real example inputs (combined 3 x `cpx32`, 20 GB volumes, placeholder SSH key, documentation CIDR) so the CI compliance plan exercises every policy feature (#12)
+- `.gitignore` re-includes `examples/**/.terraform.lock.hcl` (a global ignore otherwise hides it) (#12)
+- `make test` and the CI compliance job detect `@tofu-test` on tag lines only; comments mentioning it no longer cause policy features to be skipped (#12)
 - Test mock providers pin numeric ids for `hcloud_volume` and `hcloud_server` (consumed by `hcloud_volume_attachment`) (#9)
 - CI path filter includes `**/*.tftpl` and `modules/**/*.sh` (#9)
 - `image` input is now wired into `hcloud_server` (tflint ignore removed) (#8)
