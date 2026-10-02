@@ -69,8 +69,17 @@ jobs:
         with:
           version: ${{ env.TRIVY_VERSION }}
       - run: tofu fmt -check -recursive
-      - run: tofu init -backend=false -input=false
-      - run: tofu validate
+      - name: tofu validate (module)
+        working-directory: ${{ env.MODULE_DIR }}
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+      # -backend=false: the S3 backend needs Object Storage credentials.
+      - name: tofu validate (examples/complete)
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          tofu init -backend=false -input=false -lockfile=readonly
+          tofu validate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -126,7 +135,8 @@ jobs:
           if [ ! -d "$TF_DIR" ]; then
             echo "::notice title=terraform-compliance skipped::$TF_DIR does not exist yet"
             echo "run=false" >> "$GITHUB_OUTPUT"
-          elif ! find "$FEATURES_DIR" -name '*.feature' -exec grep -L '@tofu-test' {} + 2>/dev/null | grep -q .; then
+          # Match the tag line only; comments may mention @tofu-test.
+          elif ! find "$FEATURES_DIR" -name '*.feature' -exec grep -LE '^[[:space:]]*@[^#]*tofu-test' {} + 2>/dev/null | grep -q .; then
             # @tofu-test features are executed by the module-test job.
             echo "::notice title=terraform-compliance skipped::no non-@tofu-test .feature files in $FEATURES_DIR"
             echo "run=false" >> "$GITHUB_OUTPUT"

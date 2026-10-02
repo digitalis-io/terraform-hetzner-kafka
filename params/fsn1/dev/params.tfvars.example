@@ -1,4 +1,34 @@
 # Example variables for location fsn1, environment dev.
-# Copy to params.tfvars. No secrets: HCLOUD_TOKEN is read from the environment.
-# `location` and `environment` are passed by the Makefile via -var.
-# Module inputs are added with examples/complete (tickets #6 and #12).
+# Copy to params.tfvars and edit. No secrets: HCLOUD_TOKEN is read from the
+# environment. `location` and `environment` are passed by the Makefile via -var.
+# CI plans this file with a dummy token (terraform-compliance), so it must not
+# need the Hetzner API at plan time: keep ssh_key_names empty here.
+
+name = "kafka" # resources are named kafka-dev-<resource>
+
+# Combined topology: 3 nodes, each broker + KRaft controller.
+broker_count       = 3
+broker_server_type = "cpx32"
+image              = "ubuntu-24.04"
+
+# KRaft quorum size is fixed at first boot. Do NOT change controller_count or
+# dedicated_controllers after the first apply.
+dedicated_controllers = false
+controller_count      = null
+
+# 20 GB data volume per broker at /var/lib/kafka (delete-protected).
+volume_size_gb = 20
+
+# Replace with your own public key (or use ssh_key_names for keys already in
+# the Hetzner project). This placeholder is NOT a real key.
+ssh_public_keys = {
+  operator = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE operator@example"
+}
+ssh_key_names = []
+
+# Your workstation / CI egress IP. 203.0.113.0/24 is a documentation range.
+ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+labels = {
+  team = "data"
+}

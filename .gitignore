@@ -1,5 +1,7 @@
 .terraform/
 modules/**/.terraform.lock.hcl
+# Root configurations commit their provider lock (overrides global ignores).
+!examples/**/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
