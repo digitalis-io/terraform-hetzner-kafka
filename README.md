@@ -5,23 +5,76 @@
 </p>
 
 <p align="center">
-  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a></em>
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a>: Apache Kafka experts, 24x7 managed services and consultancy</em>
 </p>
 
-# terraform-hetzner-kafka
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#need-help-running-kafka">Need help running Kafka?</a> ·
+  <a href="https://digitalis.io/contact">Talk to an engineer</a>
+</p>
 
-Provision an Apache Kafka (KRaft) cluster on Hetzner Cloud with OpenTofu, then
-install and configure Kafka with the `axonops.axonops` Ansible collection.
+# Apache Kafka on Hetzner Cloud
 
-- **OpenTofu** creates the private network, an SSH-only firewall, spread
-  placement groups, servers, optional data volumes and an Ansible inventory
-  (`inventory.yml`).
-- **Ansible** (`ansible/`) installs Kafka on those servers and runs a
-  produce/consume smoke test.
-- **Make** drives the whole lifecycle from the repo root.
+Production-shaped Apache Kafka (KRaft, no ZooKeeper) on Hetzner Cloud in one
+command sequence: OpenTofu builds the infrastructure, Ansible installs and
+verifies Kafka.
 
-Kafka listens on the private network only. Clients must run inside the same
-Hetzner network.
+```bash
+make apply ENVIRONMENT=dev && make galaxy configure smoke-test
+```
+
+Hetzner Cloud gives you fast, low-cost European (and US/Singapore) compute.
+This project turns it into a Kafka cluster with the defaults we use for our
+own managed-service customers, so you start from a sound baseline instead of a
+blank VM.
+
+## Why use it
+
+| You get | How |
+|---------|-----|
+| **A working cluster, proven on every run** | `make smoke-test` produces and consumes a message across the private network; `make configure` fails unless the KRaft quorum has elected a leader |
+| **Durable by default** | New topics get replication factor 3 and `min.insync.replicas` 2 (scaled down for smaller clusters); topic auto-creation is off |
+| **Kafka off the public internet** | Brokers advertise private IPs only. The public firewall allows SSH from your allowlist and nothing else; ports 9092/9093 are never opened |
+| **Hardware failure isolation** | Brokers and controllers sit in Hetzner *spread* placement groups, so no two share a physical host |
+| **Your choice of topology** | Combined broker+controller nodes for small clusters, or a dedicated 3/5-node controller quorum with up to 10 brokers |
+| **Data that survives a rebuild** | Optional delete-protected Hetzner volumes per broker, formatted and mounted automatically, never reformatted |
+| **Infrastructure you can review** | Plain OpenTofu and Ansible, remote state on Hetzner Object Storage, validated inputs, and policy tests (terraform-compliance, `tofu test`, ansible-lint, molecule) in CI |
+| **Built on the AxonOps toolchain** | Configured with the [`axonops.axonops`](https://github.com/axonops/axonops-ansible-collection) collection, which also installs the [AxonOps](https://axonops.com) agent for Kafka monitoring and management (switched on in a coming release) |
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph You
+    M["make apply"] --> T["OpenTofu<br/>examples/complete"]
+    C["make configure<br/>smoke-test"] --> A["Ansible<br/>axonops.axonops"]
+  end
+  subgraph Hetzner["Hetzner Cloud project"]
+    FW["Firewall<br/>SSH from allowlist only"]
+    subgraph Net["Private network 10.0.0.0/16"]
+      B1["broker-1"] <--> B2["broker-2"] <--> B3["broker-3"]
+    end
+    V["Optional volumes<br/>/var/lib/kafka"]
+  end
+  T -->|creates| FW & Net & V
+  T -->|writes| I["inventory.yml"]
+  I --> A
+  A -->|SSH| B1 & B2 & B3
+  Apps["Your producers / consumers<br/>in the same network"] -->|9092| B1
+```
+
+1. **OpenTofu** (`modules/kafka-cluster`) creates the private network, an
+   SSH-only firewall, spread placement groups, servers, optional data volumes
+   and an Ansible inventory (`inventory.yml`). Every server's cloud-init brings
+   up its private network interface.
+2. **Ansible** (`ansible/`) installs Java and Kafka 4.x in KRaft mode, waits
+   for the quorum, and runs a produce/consume smoke test.
+3. **Make** drives the whole lifecycle from the repo root.
+
+Clients connect over the Hetzner private network. Design notes:
+[architecture](docs/architecture.md) and [ADRs](docs/adr/).
 
 ## Contents
 
@@ -32,7 +85,7 @@ Hetzner network.
 - [Outputs reference](#outputs-reference)
 - [Operations and caveats](#operations-and-caveats)
 - [Repository layout](#repository-layout)
-- [Contact](#contact)
+- [Need help running Kafka?](#need-help-running-kafka)
 
 ## Quick start
 
@@ -242,7 +295,9 @@ Deleting a volume deletes its Kafka data permanently.
 ### Security
 
 - Kafka uses **PLAINTEXT** listeners on the private network in this release.
-  TLS and SASL are planned. Do not route untrusted clients into the network.
+  TLS and SASL/SCRAM are planned. Do not route untrusted clients into the
+  network. Need encryption and authentication now?
+  [Digitalis can enable them for you](https://digitalis.io/contact).
 - The public firewall opens only SSH (22/tcp) and, optionally, ICMP from
   `ssh_allowed_cidrs`. Kafka ports 9092/9093 are never public.
 - Hetzner firewalls do not filter private network traffic; anything in the
@@ -271,6 +326,30 @@ make plan apply ENVIRONMENT=dev LOCK=false
 | `tests/compliance/features/` | Gherkin specs: terraform-compliance policies and `@tofu-test` specs |
 | `docs/` | [Architecture](docs/architecture.md) and ADRs |
 
+## Need help running Kafka?
+
+This project gives you a sound starting point. Running Kafka well in
+production (sizing, upgrades, security, incident response) is what we do
+every day.
+
+[Digitalis.io](https://digitalis.io) provides expert **managed services and
+consultancy for Apache Kafka**, Cassandra, Kubernetes and the wider
+cloud-native and observability stack:
+
+- **24x7 managed Kafka:** monitoring and alerting, patching and upgrades,
+  capacity planning and incident response, run by engineers who operate Kafka
+  for a living.
+- **Design and migration:** cluster and topic design, ZooKeeper-to-KRaft
+  migrations, moves to or from managed cloud Kafka, and Hetzner deployments
+  like this one.
+- **Security hardening:** TLS, SASL/SCRAM, ACLs and secrets management.
+- **AxonOps:** full visibility and control of brokers, topics, consumer groups
+  and Kafka Connect through [AxonOps](https://axonops.com), installed by the
+  same Ansible collection this project uses.
+
+**[Talk to a Kafka engineer →](https://digitalis.io/contact)**
+
 ## Contact
 
-This project is maintained by [Digitalis.io](https://digitalis.io). For support, visit [digitalis.io/contact](https://digitalis.io/contact).
+This project is maintained by [Digitalis.io](https://digitalis.io). For
+support, visit [digitalis.io/contact](https://digitalis.io/contact).

@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a>: Apache Kafka experts, 24x7 managed services and consultancy</em>
+</p>
+
 # kafka-cluster
 
 Builds a KRaft Apache Kafka cluster on Hetzner Cloud. Current scope: validated
@@ -303,3 +313,9 @@ No modules.
 | <a name="output_ssh_keys"></a> [ssh\_keys](#output\_ssh\_keys) | Names of every SSH key injected into the servers: ssh\_key\_names as given, then the keys created from ssh\_public\_keys (<name>-<key>). |
 | <a name="output_subnet_id"></a> [subnet\_id](#output\_subnet\_id) | ID of the node subnet (hcloud\_network\_subnet), formatted as NETWORK\_ID-IP\_RANGE. |
 <!-- END_TF_DOCS -->
+
+## Contact
+
+This project is maintained by [Digitalis.io](https://digitalis.io), providing
+managed services and consultancy for Apache Kafka. For support, visit
+[digitalis.io/contact](https://digitalis.io/contact).
