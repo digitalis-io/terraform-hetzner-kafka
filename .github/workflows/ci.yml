@@ -202,9 +202,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ansible-core==2.17.* "molecule==25.*" "molecule-plugins[docker]==23.*" docker
-      - run: ansible-galaxy collection install -r requirements.yml
+      # Install into ~/.ansible/collections: molecule runs its own playbooks
+      # with its own collections path, which does not include ansible/.ansible.
+      - run: ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
       # Test-only: molecule's docker driver playbooks use community.docker.
-      - run: ansible-galaxy collection install "community.docker:>=3.0.0,<5.0.0"
+      - run: ansible-galaxy collection install "community.docker:>=3.0.0,<5.0.0" -p ~/.ansible/collections
       - run: molecule test
         env:
           PY_COLORS: "1"
