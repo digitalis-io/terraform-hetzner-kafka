@@ -1,8 +1,9 @@
 # kafka-cluster
 
 Builds a KRaft Apache Kafka cluster on Hetzner Cloud. Current scope: validated
-inputs, the `nodes` map, the private network/subnet and an SSH-only public
-firewall. Servers, volumes and the Ansible inventory are added by later tickets.
+inputs, the `nodes` map, the private network/subnet, an SSH-only public
+firewall, SSH keys, spread placement groups and one server per node. Data
+volumes and the Ansible inventory are added by later tickets.
 
 ## Usage
 
@@ -73,6 +74,31 @@ the `firewall_id` output.
 Network and firewall carry the `labels` input plus `cluster = <name>` and
 `managed-by = opentofu`.
 
+## Servers, SSH keys and placement groups
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| `hcloud_ssh_key` | `<name>-<key>` | One per `ssh_public_keys` entry |
+| `data.hcloud_ssh_key` | — | One lookup per `ssh_key_names` entry; none when the list is empty |
+| `hcloud_placement_group` | `<name>-brokers`, `<name>-controllers` | `type = "spread"` (one physical host per member, max 10). Controllers group only when `dedicated_controllers = true` |
+| `hcloud_server` | `<name>-<key>` (e.g. `kafka-dev-broker-1`) | One per `nodes` entry; pool placement group; `firewall_ids = [firewall]`; private IP from `nodes`; public IPv4 and IPv6 on; labels `cluster`, `role`, `managed-by` + `labels` |
+
+- Servers receive every key: `ssh_key_names` first, then created keys (output
+  `ssh_keys`). Keys are referenced by name.
+- Public IPv4 is required for Ansible SSH and package/agent egress; IPv6 is
+  enabled too. Both are behind the SSH-only firewall. Private-only nodes are
+  out of MVP scope.
+- `lifecycle { ignore_changes = [user_data, image, ssh_keys] }` (ADR-0005):
+  changing `image`, cloud-init or keys never rebuilds a Kafka node. Rebuild on
+  purpose with `tofu apply -replace='module.kafka.hcloud_server.this["broker-1"]'`;
+  rotate keys with Ansible.
+- Scaling a pool only adds or removes tail servers; existing servers are not
+  changed.
+- `user_data` is currently `null` for every node; #9 fills it in for volume
+  mounts.
+- `ssh_key_names` is read from the Hetzner API during plan, so `plan` needs
+  `HCLOUD_TOKEN` with read access even for `-refresh=false` plans.
+
 ## Validation
 
 | Rule | Where |
@@ -100,8 +126,8 @@ tofu test
 Or `make module-test` from the repository root. Plan-only, mocked `hcloud`
 provider, no credentials needed. Gherkin specifications
 live in `tests/compliance/features/`: files tagged `@tofu-test` are realised by
-these suites; `network_firewall_policy.feature` runs under terraform-compliance
-against a plan JSON (`make test`).
+these suites; `network_firewall_policy.feature` and `servers_policy.feature`
+run under terraform-compliance against a plan JSON (`make test`).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -128,6 +154,10 @@ No modules.
 | [hcloud_firewall.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/firewall) | resource |
 | [hcloud_network.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/network) | resource |
 | [hcloud_network_subnet.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/network_subnet) | resource |
+| [hcloud_placement_group.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/placement_group) | resource |
+| [hcloud_server.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/server) | resource |
+| [hcloud_ssh_key.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/ssh_key) | resource |
+| [hcloud_ssh_key.existing](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/data-sources/ssh_key) | data source |
 
 ## Inputs
 
@@ -139,13 +169,13 @@ No modules.
 | <a name="input_controller_count"></a> [controller\_count](#input\_controller\_count) | Number of KRaft controllers (quorum voters): 1, 3, 5, or null for automatic (dedicated mode 3; combined mode 3 when broker\_count >= 3, else 1). In combined mode it must not exceed broker\_count. | `number` | `null` | no |
 | <a name="input_controller_server_type"></a> [controller\_server\_type](#input\_controller\_server\_type) | Hetzner Cloud server type for dedicated controller nodes. Ignored in combined mode. Null uses broker\_server\_type. | `string` | `null` | no |
 | <a name="input_dedicated_controllers"></a> [dedicated\_controllers](#input\_dedicated\_controllers) | When true, run a separate pool of controller-only nodes; when false, the first controller\_count brokers also act as KRaft controllers. | `bool` | `false` | no |
-| <a name="input_image"></a> [image](#input\_image) | Hetzner Cloud image name for every node. | `string` | `"ubuntu-24.04"` | no |
+| <a name="input_image"></a> [image](#input\_image) | Hetzner Cloud image name for every node. Applied at creation only; later changes are ignored and do not rebuild servers. | `string` | `"ubuntu-24.04"` | no |
 | <a name="input_labels"></a> [labels](#input\_labels) | Extra Hetzner labels applied to every resource. The module sets cluster, role and managed-by, which take precedence. | `map(string)` | `{}` | no |
 | <a name="input_location"></a> [location](#input\_location) | Hetzner Cloud location for every node. One of: fsn1, nbg1, hel1, ash, hil, sin. | `string` | n/a | yes |
 | <a name="input_name"></a> [name](#input\_name) | Cluster name, used as a prefix for every resource and as the `cluster` label. Lowercase letters, digits and hyphens, 1 to 40 characters. | `string` | n/a | yes |
 | <a name="input_network_cidr"></a> [network\_cidr](#input\_network\_cidr) | IPv4 range of the Hetzner private network. | `string` | `"10.0.0.0/16"` | no |
 | <a name="input_network_zone"></a> [network\_zone](#input\_network\_zone) | Hetzner network zone of the private subnet. Must contain `location`. One of: eu-central, us-east, us-west, ap-southeast. | `string` | n/a | yes |
-| <a name="input_ssh_allowed_cidrs"></a> [ssh\_allowed\_cidrs](#input\_ssh\_allowed\_cidrs) | Source CIDRs allowed to reach SSH (22/tcp) on public interfaces. Empty means no public inbound TCP rule. 0.0.0.0/0 and ::/0 are rejected. | `list(string)` | `[]` | no |
+| <a name="input_ssh_allowed_cidrs"></a> [ssh\_allowed\_cidrs](#input\_ssh\_allowed\_cidrs) | Source CIDRs allowed to reach SSH (22/tcp) on public interfaces. Empty means no public inbound TCP rule. Prefixes shorter than /8 (IPv4) or /32 (IPv6), including 0.0.0.0/0 and ::/0, are rejected. | `list(string)` | `[]` | no |
 | <a name="input_ssh_key_names"></a> [ssh\_key\_names](#input\_ssh\_key\_names) | Names of SSH keys that already exist in the Hetzner Cloud project. At least one of ssh\_key\_names or ssh\_public\_keys must be set. | `list(string)` | `[]` | no |
 | <a name="input_ssh_public_keys"></a> [ssh\_public\_keys](#input\_ssh\_public\_keys) | SSH public keys to create in the project, as a map of key name to OpenSSH public key. At least one of ssh\_key\_names or ssh\_public\_keys must be set. | `map(string)` | `{}` | no |
 | <a name="input_subnet_cidr"></a> [subnet\_cidr](#input\_subnet\_cidr) | IPv4 range of the node subnet. Must sit inside network\_cidr and be /27 or larger (nodes use host offsets 10-29). | `string` | `"10.0.1.0/24"` | no |
@@ -158,5 +188,8 @@ No modules.
 | <a name="output_firewall_id"></a> [firewall\_id](#output\_firewall\_id) | ID of the public-interface firewall. Pass to hcloud\_server.firewall\_ids to apply it. |
 | <a name="output_network_id"></a> [network\_id](#output\_network\_id) | ID of the Hetzner private network (hcloud\_network). |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Map of node key (broker-<n>, controller-<n>) to node attributes: role, node\_id, kafka\_roles, server\_type, private\_ip, has\_volume, labels. |
+| <a name="output_placement_group_ids"></a> [placement\_group\_ids](#output\_placement\_group\_ids) | Map of pool (broker, controller) to spread placement group ID. controller is present only when dedicated\_controllers = true. |
+| <a name="output_servers"></a> [servers](#output\_servers) | Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public\_ipv4, public\_ipv6, private\_ip. |
+| <a name="output_ssh_keys"></a> [ssh\_keys](#output\_ssh\_keys) | Names of every SSH key injected into the servers: ssh\_key\_names as given, then the keys created from ssh\_public\_keys (<name>-<key>). |
 | <a name="output_subnet_id"></a> [subnet\_id](#output\_subnet\_id) | ID of the node subnet (hcloud\_network\_subnet), formatted as NETWORK\_ID-IP\_RANGE. |
 <!-- END_TF_DOCS -->
