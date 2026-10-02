@@ -34,20 +34,4 @@ resource "hcloud_volume_attachment" "this" {
 locals {
   # Mount point for Kafka data; the Ansible side expects log.dirs below it.
   kafka_data_dir = "/var/lib/kafka"
-
-  # Per-node cloud-init: rendered only for nodes with a volume, null otherwise.
-  # Built from hcloud_volume.this (not a conditional over local.nodes) so the
-  # template is never evaluated for a node without a volume. hcloud_server
-  # ignores later user_data changes, so editing the template never replaces a
-  # server; only servers created afterwards pick it up.
-  user_data = merge(
-    { for k in keys(local.nodes) : k => null },
-    {
-      for k, v in hcloud_volume.this : k => templatefile("${path.module}/templates/cloud-init.yaml.tftpl", {
-        device      = v.linux_device
-        mount_point = local.kafka_data_dir
-        script      = file("${path.module}/templates/mount-data-volume.sh")
-      })
-    }
-  )
 }

@@ -46,3 +46,15 @@ Feature: Configure a Kafka KRaft cluster with site.yml
     Given a host with an /etc/fstab entry for /var/lib/kafka
     And that mountpoint is not currently mounted
     Then the play fails in pre_tasks before installing Kafka
+
+  Scenario: Private network NIC down fails before installing Kafka
+    Given a host whose kafka_node_ip is not configured on any interface
+    When ansible-playbook site.yml runs
+    Then the netplan file for the Hetzner private NIC is installed and applied
+    And the play fails before installing Kafka if kafka_node_ip is still missing
+
+  Scenario: Configure waits for the KRaft quorum
+    Given Kafka has been installed and started on every host
+    When ansible-playbook site.yml finishes
+    Then every host reports an elected KRaft leader
+    And the play fails if no leader is elected within 5 minutes

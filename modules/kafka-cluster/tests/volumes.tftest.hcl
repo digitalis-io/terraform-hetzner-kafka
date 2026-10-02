@@ -48,8 +48,8 @@ run "no_volumes_by_default" {
   }
 
   assert {
-    condition     = alltrue([for s in hcloud_server.this : s.user_data == null])
-    error_message = "Servers must have no user_data when no volume is attached."
+    condition     = alltrue([for s in hcloud_server.this : !strcontains(s.user_data, "kafka-mount-data-volume") && length(yamldecode(s.user_data).write_files) == 1])
+    error_message = "Without a volume, cloud-init must only configure the private NIC (no mount script)."
   }
 
   assert {
@@ -111,7 +111,7 @@ run "volumes_for_brokers" {
   }
 
   assert {
-    condition     = yamldecode(hcloud_server.this["broker-1"].user_data).write_files[0].content == file("${path.module}/templates/mount-data-volume.sh")
+    condition     = yamldecode(hcloud_server.this["broker-1"].user_data).write_files[1].content == file("${path.module}/templates/mount-data-volume.sh")
     error_message = "cloud-init must ship the mount script byte-for-byte (the script tested by tests/cloud-init)."
   }
 
@@ -140,8 +140,8 @@ run "dedicated_controllers_get_no_volume" {
   }
 
   assert {
-    condition     = alltrue([for k, s in hcloud_server.this : startswith(k, "controller-") ? s.user_data == null : s.user_data != null])
-    error_message = "Controllers must have no user_data; brokers must have the volume cloud-init."
+    condition     = alltrue([for k, s in hcloud_server.this : startswith(k, "controller-") ? !strcontains(s.user_data, "kafka-mount-data-volume") : strcontains(s.user_data, "kafka-mount-data-volume")])
+    error_message = "Controllers must not get the mount script; brokers must."
   }
 
   assert {

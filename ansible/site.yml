@@ -49,6 +49,47 @@
           play before any installation happens.
       tags: always
 
+    # #13: Hetzner attaches the private network after cloud-init has written
+    # netplan for eth0 only, so on servers created before the module's
+    # cloud-init fix the private NIC is DOWN and has no 10.x address. Install
+    # the same netplan file the module ships (single source of truth) and
+    # apply it, then prove kafka_node_ip is really on the host. Skipped where
+    # netplan is absent (e.g. molecule containers).
+    - name: Check whether the host uses netplan
+      ansible.builtin.stat:
+        path: /usr/sbin/netplan
+      register: kafka__reg_netplan
+      tags: always
+
+    - name: Install the Hetzner private network netplan file
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../modules/kafka-cluster/templates/netplan-private.yaml"
+        dest: /etc/netplan/60-hetzner-private.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      notify:
+        - Apply netplan so the private NIC gets its address
+        - Refresh network facts after netplan apply
+      when: kafka__reg_netplan.stat.exists
+      tags: always
+
+    - name: Apply the netplan change before checking the private IP
+      ansible.builtin.meta: flush_handlers
+      tags: always
+
+    - name: Assert kafka_node_ip is configured on the host
+      ansible.builtin.assert:
+        that:
+          - kafka_node_ip in ansible_facts.all_ipv4_addresses
+        fail_msg: >-
+          {{ kafka_node_ip }} (kafka_node_ip) is not configured on
+          {{ inventory_hostname }} (found {{ ansible_facts.all_ipv4_addresses }}).
+          The Hetzner private network NIC is down, so KRaft controllers cannot
+          reach each other. Check `ip -br addr` and
+          /etc/netplan/60-hetzner-private.yaml.
+      tags: always
+
     # #9 (volumes): cloud-init mounts the broker data volume at
     # /var/lib/kafka with `nofail`, so a slow Hetzner volume attachment
     # mounts silently absent rather than failing cloud-init. An /etc/fstab
@@ -97,3 +138,36 @@
       tags: preflight
     - role: axonops.axonops.kafka
       tags: kafka
+
+  post_tasks:
+    # The kafka role starts the service but does not wait for the KRaft
+    # quorum, so a cluster whose controllers cannot reach each other would
+    # still "configure" successfully (#13). Wait for an elected leader.
+    - name: Wait for the KRaft quorum to elect a leader
+      ansible.builtin.command:
+        cmd: >-
+          {{ kafka__site_bin_dir }}/kafka-metadata-quorum.sh
+          {{ ('--bootstrap-server ' ~ kafka_node_ip ~ ':9092')
+             if 'broker' in kafka_node_roles
+             else ('--bootstrap-controller ' ~ kafka_node_ip ~ ':9093') }}
+          describe --status
+      vars:
+        kafka__site_bin_dir: "{{ kafka_install_root | default('/opt') }}/kafka/bin"
+      register: kafka__reg_quorum
+      changed_when: false
+      retries: 30
+      delay: 10
+      until:
+        - kafka__reg_quorum.rc == 0
+        - kafka__reg_quorum.stdout is regex('LeaderId:\\s+[0-9]+')
+      tags: kafka
+
+  handlers:
+    - name: Apply netplan so the private NIC gets its address
+      ansible.builtin.command:
+        cmd: netplan apply
+      changed_when: true
+
+    - name: Refresh network facts after netplan apply
+      ansible.builtin.setup:
+        gather_subset: [network]
