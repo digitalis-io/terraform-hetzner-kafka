@@ -23,7 +23,7 @@ repos:
         args:
           - --args=--severity HIGH,CRITICAL
           - --args=--exit-code 1
-          - --args=--ignore-policy AVD-GIT-0001
+          - --args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore
 
   - repo: https://github.com/terraform-docs/terraform-docs
     rev: v0.22.0

@@ -30,6 +30,7 @@ Feature: Invalid cluster inputs are rejected
       | controller_count  | 2                    |
       | ssh_allowed_cidrs | ["0.0.0.0/0"]        |
       | ssh_allowed_cidrs | ["::/0"]             |
+      | ssh_allowed_cidrs | ["0.0.0.0/1"]        |
       | ssh_allowed_cidrs | ["not-a-cidr"]       |
       | subnet_cidr       | "not-a-cidr"         |
       | subnet_cidr       | "10.0.1.0/28"        |

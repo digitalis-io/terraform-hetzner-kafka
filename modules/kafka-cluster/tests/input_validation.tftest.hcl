@@ -3,7 +3,13 @@
 # named variable validation or by the cross-variable preconditions on
 # output.nodes. Plan-only, mocked provider, nothing persisted.
 
-mock_provider "hcloud" {}
+mock_provider "hcloud" {
+  # hcloud_network.id is a numeric string; the generated mock id is random
+  # text, which hcloud_network_subnet.network_id (a number) rejects.
+  mock_resource "hcloud_network" {
+    defaults = { id = "1001" }
+  }
+}
 
 variables {
   name               = "kafka-test"
@@ -158,7 +164,7 @@ run "subnet_outside_network_rejected" {
     network_cidr = "10.0.0.0/16"
     subnet_cidr  = "10.1.1.0/24"
   }
-  expect_failures = [output.nodes]
+  expect_failures = [hcloud_network_subnet.this, output.nodes]
 }
 
 run "subnet_wider_than_network_rejected" {
@@ -167,7 +173,7 @@ run "subnet_wider_than_network_rejected" {
     network_cidr = "10.0.1.0/24"
     subnet_cidr  = "10.0.0.0/16"
   }
-  expect_failures = [output.nodes]
+  expect_failures = [hcloud_network_subnet.this, output.nodes]
 }
 
 run "network_zone_mismatch_rejected" {
@@ -183,4 +189,21 @@ run "no_ssh_key_rejected" {
     ssh_public_keys = {}
   }
   expect_failures = [output.nodes]
+}
+
+run "ssh_allowed_cidrs_rejects_split_ipv4_halves" {
+  command = plan
+  variables { ssh_allowed_cidrs = ["0.0.0.0/1", "128.0.0.0/1"] }
+  expect_failures = [var.ssh_allowed_cidrs]
+}
+
+run "ssh_allowed_cidrs_rejects_wide_ipv6" {
+  command = plan
+  variables { ssh_allowed_cidrs = ["::/1", "8000::/1"] }
+  expect_failures = [var.ssh_allowed_cidrs]
+}
+
+run "ssh_allowed_cidrs_accepts_slash8_and_ipv6_slash48" {
+  command = plan
+  variables { ssh_allowed_cidrs = ["10.0.0.0/8", "2001:db8:abcd::/48"] }
 }

@@ -2,7 +2,13 @@
 # Plan-only against a mocked hcloud provider: no credentials, no real
 # resources, nothing to clean up. Runs are independent and order-free.
 
-mock_provider "hcloud" {}
+mock_provider "hcloud" {
+  # hcloud_network.id is a numeric string; the generated mock id is random
+  # text, which hcloud_network_subnet.network_id (a number) rejects.
+  mock_resource "hcloud_network" {
+    defaults = { id = "1001" }
+  }
+}
 
 variables {
   name               = "kafka-test"

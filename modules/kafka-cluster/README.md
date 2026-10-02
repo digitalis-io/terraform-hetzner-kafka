@@ -1,8 +1,8 @@
 # kafka-cluster
 
-Builds the node plan for a KRaft Apache Kafka cluster on Hetzner Cloud. Iteration 1
-skeleton: validated inputs and the `nodes` map. Network, servers, volumes and the
-Ansible inventory are added by later tickets.
+Builds a KRaft Apache Kafka cluster on Hetzner Cloud. Current scope: validated
+inputs, the `nodes` map, the private network/subnet and an SSH-only public
+firewall. Servers, volumes and the Ansible inventory are added by later tickets.
 
 ## Usage
 
@@ -55,6 +55,24 @@ module "kafka" {
 Keys are stable: resizing a pool only adds or removes tail nodes. Changing
 controller membership after first boot is unsupported (static KRaft quorum).
 
+## Network and firewall
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| `hcloud_network` | `<name>-net` | `ip_range = network_cidr` (default `10.0.0.0/16`) |
+| `hcloud_network_subnet` | — | `type = "cloud"`, `network_zone`, `ip_range = subnet_cidr` (default `10.0.1.0/24`) |
+| `hcloud_firewall` | `<name>-fw` | Inbound 22/tcp and, if `allow_icmp`, ICMP from `ssh_allowed_cidrs` only |
+
+Kafka (9092/9093) is never opened on the public firewall: MVP Kafka is PLAINTEXT
+and is reachable only over the private network, which Hetzner firewalls do not
+filter (ADR-0004). An empty `ssh_allowed_cidrs` produces a firewall with no
+inbound rules, which drops all public inbound traffic. No outbound rules are set,
+so egress stays open. Servers attach the firewall through `firewall_ids` using
+the `firewall_id` output.
+
+Network and firewall carry the `labels` input plus `cluster = <name>` and
+`managed-by = opentofu`.
+
 ## Validation
 
 | Rule | Where |
@@ -64,7 +82,7 @@ controller membership after first boot is unsupported (static KRaft quorum).
 | `subnet_cidr` valid IPv4, /27 or larger; `network_cidr` valid IPv4 | variable validation |
 | `volume_size_gb` 0 or 10..10240; `name` `^[a-z0-9-]{1,40}$` | variable validation |
 | Combined mode: `controller_count <= broker_count` | `output.nodes` precondition |
-| `subnet_cidr` inside `network_cidr` | `output.nodes` precondition |
+| `subnet_cidr` inside `network_cidr` | `output.nodes` and `hcloud_network_subnet` preconditions |
 | `location` belongs to `network_zone` | `output.nodes` precondition |
 | At least one of `ssh_key_names` / `ssh_public_keys` | `output.nodes` precondition |
 
@@ -81,8 +99,9 @@ tofu test
 
 Or `make module-test` from the repository root. Plan-only, mocked `hcloud`
 provider, no credentials needed. Gherkin specifications
-live in `tests/compliance/features/` (tagged `@tofu-test`, skipped by
-terraform-compliance).
+live in `tests/compliance/features/`: files tagged `@tofu-test` are realised by
+these suites; `network_firewall_policy.feature` runs under terraform-compliance
+against a plan JSON (`make test`).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -94,7 +113,9 @@ terraform-compliance).
 
 ## Providers
 
-No providers.
+| Name | Version |
+|------|---------|
+| <a name="provider_hcloud"></a> [hcloud](#provider\_hcloud) | 1.69.0 |
 
 ## Modules
 
@@ -102,12 +123,17 @@ No modules.
 
 ## Resources
 
-No resources.
+| Name | Type |
+|------|------|
+| [hcloud_firewall.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/firewall) | resource |
+| [hcloud_network.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/network) | resource |
+| [hcloud_network_subnet.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/network_subnet) | resource |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_allow_icmp"></a> [allow\_icmp](#input\_allow\_icmp) | When true, allow inbound ICMP (ping) from ssh\_allowed\_cidrs on public interfaces. Has no effect when ssh\_allowed\_cidrs is empty. | `bool` | `true` | no |
 | <a name="input_broker_count"></a> [broker\_count](#input\_broker\_count) | Number of broker nodes, 1 to 10 (one Hetzner spread placement group holds at most 10 servers). | `number` | n/a | yes |
 | <a name="input_broker_server_type"></a> [broker\_server\_type](#input\_broker\_server\_type) | Hetzner Cloud server type for broker nodes, for example cpx32. | `string` | n/a | yes |
 | <a name="input_controller_count"></a> [controller\_count](#input\_controller\_count) | Number of KRaft controllers (quorum voters): 1, 3, 5, or null for automatic (dedicated mode 3; combined mode 3 when broker\_count >= 3, else 1). In combined mode it must not exceed broker\_count. | `number` | `null` | no |
@@ -129,5 +155,8 @@ No resources.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_firewall_id"></a> [firewall\_id](#output\_firewall\_id) | ID of the public-interface firewall. Pass to hcloud\_server.firewall\_ids to apply it. |
+| <a name="output_network_id"></a> [network\_id](#output\_network\_id) | ID of the Hetzner private network (hcloud\_network). |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Map of node key (broker-<n>, controller-<n>) to node attributes: role, node\_id, kafka\_roles, server\_type, private\_ip, has\_volume, labels. |
+| <a name="output_subnet_id"></a> [subnet\_id](#output\_subnet\_id) | ID of the node subnet (hcloud\_network\_subnet), formatted as NETWORK\_ID-IP\_RANGE. |
 <!-- END_TF_DOCS -->
