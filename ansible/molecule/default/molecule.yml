@@ -16,6 +16,9 @@ platforms:
   - name: kafka-combined-1
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
@@ -27,6 +30,9 @@ platforms:
   - name: kafka-combined-2
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
@@ -38,6 +44,9 @@ platforms:
   - name: kafka-combined-3
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
