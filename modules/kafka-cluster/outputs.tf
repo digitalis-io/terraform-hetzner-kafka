@@ -43,7 +43,7 @@ output "firewall_id" {
 }
 
 output "servers" {
-  description = "Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public_ipv4, public_ipv6, private_ip."
+  description = "Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public_ipv4, public_ipv6, private_ip, volume_id (null when the node has no data volume)."
   value = {
     for k, s in hcloud_server.this : k => {
       id          = s.id
@@ -51,6 +51,7 @@ output "servers" {
       public_ipv4 = s.ipv4_address
       public_ipv6 = s.ipv6_address
       private_ip  = local.nodes[k].private_ip
+      volume_id   = try(hcloud_volume.this[k].id, null)
     }
   }
 }

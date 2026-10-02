@@ -1,6 +1,6 @@
 .EXPORT_ALL_VARIABLES:
 .ONESHELL:
-.PHONY: apply destroy plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test
+.PHONY: apply destroy plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test cloud-init-test
 
 # Multi-step recipes are chained on one shell line (&&, ;) so they behave the
 # same under GNU make 3.81 (macOS, no .ONESHELL) and 4.x.
@@ -130,6 +130,9 @@ test: check-dirs ## Run terraform-compliance against a plan (local backend, -ref
 module-test: ## Run native tofu test suites for the module (plan-only, mocked provider)
 	@$(TOFU_BIN) -chdir=$(MODULE_DIR) init -backend=false -input=false && \
 	$(TOFU_BIN) -chdir=$(MODULE_DIR) test
+
+cloud-init-test: ## Test the cloud-init volume mount script with stubbed blkid/mkfs/mount (no root)
+	@sh tests/cloud-init/test_mount_data_volume.sh
 
 fmt: ## Format all .tf files
 	@$(TOFU_BIN) fmt -recursive

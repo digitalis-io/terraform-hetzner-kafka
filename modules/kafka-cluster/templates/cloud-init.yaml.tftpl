@@ -1,0 +1,11 @@
+#cloud-config
+# Rendered by modules/kafka-cluster for nodes with a data volume (ADR-0005).
+# Applied at server creation only (hcloud_server ignores user_data changes).
+write_files:
+  - path: /usr/local/sbin/kafka-mount-data-volume
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${indent(6, script)}
+runcmd:
+  - ["/usr/local/sbin/kafka-mount-data-volume", "${device}", "${mount_point}"]

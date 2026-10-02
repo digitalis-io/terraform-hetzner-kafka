@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '**/*.tf'
+      - '**/*.tftpl'
+      - 'modules/**/*.sh'
       - '**/*.tfvars'
       - '**/*.tfvars.example'
       - '**/*.hcl.example'
@@ -17,6 +19,8 @@ on:
   pull_request:
     paths:
       - '**/*.tf'
+      - '**/*.tftpl'
+      - 'modules/**/*.sh'
       - '**/*.tfvars'
       - '**/*.tfvars.example'
       - '**/*.hcl.example'
@@ -94,6 +98,19 @@ jobs:
         run: |
           tofu init -backend=false -input=false
           tofu test
+
+  cloud-init-test:
+    name: cloud-init mount script
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # shellcheck is preinstalled on ubuntu-latest runners. dash = POSIX sh.
+      - run: shellcheck -s sh modules/kafka-cluster/templates/mount-data-volume.sh tests/cloud-init/test_mount_data_volume.sh
+      - run: make cloud-init-test
+      - run: dash tests/cloud-init/test_mount_data_volume.sh
 
   compliance:
     name: terraform-compliance

@@ -2,8 +2,8 @@
 
 Builds a KRaft Apache Kafka cluster on Hetzner Cloud. Current scope: validated
 inputs, the `nodes` map, the private network/subnet, an SSH-only public
-firewall, SSH keys, spread placement groups, one server per node and the
-Ansible inventory. Data volumes are added by a later ticket.
+firewall, SSH keys, spread placement groups, one server per node, optional
+broker data volumes and the Ansible inventory.
 
 ## Usage
 
@@ -94,10 +94,55 @@ Network and firewall carry the `labels` input plus `cluster = <name>` and
   rotate keys with Ansible.
 - Scaling a pool only adds or removes tail servers; existing servers are not
   changed.
-- `user_data` is currently `null` for every node; #9 fills it in for volume
-  mounts.
+- `user_data` is `null` unless the node has a data volume (see below).
 - `ssh_key_names` is read from the Hetzner API during plan, so `plan` needs
   `HCLOUD_TOKEN` with read access even for `-refresh=false` plans.
+
+## Data volumes
+
+`volume_size_gb = 0` (default) keeps Kafka data on the server's local disk.
+Any value from 10 to 10240 gives every broker one Hetzner volume (ADR-0005).
+Dedicated controllers never get a volume.
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| `hcloud_volume` | `<name>-<key>-data` (e.g. `kafka-dev-broker-1-data`) | `size = volume_size_gb`, same `location`, `format = "xfs"`, `delete_protection = true`, node labels |
+| `hcloud_volume_attachment` | — | Volume to its broker, `automount = false` |
+
+At first boot, cloud-init (`templates/cloud-init.yaml.tftpl`) installs and runs
+`/usr/local/sbin/kafka-mount-data-volume` (`templates/mount-data-volume.sh`):
+
+1. Waits up to 120 s for `/dev/disk/by-id/scsi-0HC_Volume_<id>` (the
+   attachment is created after the server).
+2. Runs `mkfs.xfs` only if `blkid` finds no filesystem. An existing filesystem
+   (for example a volume re-attached to a rebuilt server) is never formatted;
+   a `blkid` error aborts without formatting.
+3. Adds `<device> /var/lib/kafka <fstype> defaults,nofail,x-systemd.device-timeout=30s 0 2` to `/etc/fstab`
+   once, then mounts `/var/lib/kafka`.
+
+Output `servers` exposes each node's `volume_id` (`null` without a volume).
+Check the result on a node with `findmnt /var/lib/kafka`; failures are in
+`/var/log/cloud-init-output.log`.
+
+Design notes:
+
+- The volume is created first without `server_id`, so its device path is known
+  when the server is created and written into `user_data`. No disk discovery
+  by glob, no dependency cycle: volume -> server -> attachment.
+- cloud-init runs only at server creation. Turning volumes on for an existing
+  cluster, or editing the template, does not reach running servers
+  (`ignore_changes = [user_data]`): the volume is attached but not mounted.
+  Rebuild each broker with `tofu apply -replace=...` or mount it by hand.
+- Growing `volume_size_gb` resizes the volumes in place; growing the
+  filesystem (`xfs_growfs /var/lib/kafka`) is manual. Shrinking is not
+  supported by Hetzner.
+
+**Delete protection.** Volumes keep Kafka data through server replacement and
+cannot be deleted while protected, so `tofu destroy`, lowering `broker_count`
+or changing `location` fails on them. To remove a volume on purpose, first
+disable protection (Hetzner Console, or
+`hcloud volume disable-protection <name>-<key>-data delete`), then re-run.
+Back up anything you need first: deleting a volume deletes its data.
 
 ## Ansible inventory
 
@@ -181,13 +226,14 @@ tofu init -backend=false
 tofu test
 ```
 
-Or `make module-test` from the repository root. Mocked `hcloud` provider, no
-credentials needed. Runs are plan-only except `inventory.tftest.hcl`, which
-applies against the mock (public IPv4s are unknown at plan); nothing real is
-created. Gherkin specifications
+Or `make module-test` from the repository root. `make cloud-init-test` runs
+the volume mount script against stubbed `blkid`/`mkfs.xfs`/`mount` (no root,
+no real disk). Mocked `hcloud` provider, no credentials needed. Runs are
+plan-only except `inventory.tftest.hcl`, which applies against the mock
+(public IPv4s are unknown at plan); nothing real is created. Gherkin specifications
 live in `tests/compliance/features/`: files tagged `@tofu-test` are realised by
-these suites; `network_firewall_policy.feature` and `servers_policy.feature`
-run under terraform-compliance against a plan JSON (`make test`).
+these suites; `network_firewall_policy.feature`, `servers_policy.feature` and
+`volumes_policy.feature` run under terraform-compliance against a plan JSON (`make test`).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -217,6 +263,8 @@ No modules.
 | [hcloud_placement_group.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/placement_group) | resource |
 | [hcloud_server.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/server) | resource |
 | [hcloud_ssh_key.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/ssh_key) | resource |
+| [hcloud_volume.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/volume) | resource |
+| [hcloud_volume_attachment.this](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/resources/volume_attachment) | resource |
 | [hcloud_ssh_key.existing](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs/data-sources/ssh_key) | data source |
 
 ## Inputs
@@ -251,7 +299,7 @@ No modules.
 | <a name="output_network_id"></a> [network\_id](#output\_network\_id) | ID of the Hetzner private network (hcloud\_network). |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Map of node key (broker-<n>, controller-<n>) to node attributes: role, node\_id, kafka\_roles, server\_type, private\_ip, has\_volume, labels. |
 | <a name="output_placement_group_ids"></a> [placement\_group\_ids](#output\_placement\_group\_ids) | Map of pool (broker, controller) to spread placement group ID. controller is present only when dedicated\_controllers = true. |
-| <a name="output_servers"></a> [servers](#output\_servers) | Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public\_ipv4, public\_ipv6, private\_ip. |
+| <a name="output_servers"></a> [servers](#output\_servers) | Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public\_ipv4, public\_ipv6, private\_ip, volume\_id (null when the node has no data volume). |
 | <a name="output_ssh_keys"></a> [ssh\_keys](#output\_ssh\_keys) | Names of every SSH key injected into the servers: ssh\_key\_names as given, then the keys created from ssh\_public\_keys (<name>-<key>). |
 | <a name="output_subnet_id"></a> [subnet\_id](#output\_subnet\_id) | ID of the node subnet (hcloud\_network\_subnet), formatted as NETWORK\_ID-IP\_RANGE. |
 <!-- END_TF_DOCS -->

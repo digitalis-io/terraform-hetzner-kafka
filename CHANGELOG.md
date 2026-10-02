@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 - `kafka-cluster`: output `inventory`, a YAML Ansible inventory (`templates/inventory.yaml.tftpl` + `yamlencode`): group `kafka` with one host per server (`ansible_host` public IPv4, `ansible_user: root`, `kafka_node_id`, `kafka_node_roles`, `kafka_node_ip` private IP), group var `kafka_axonops_cluster_name`, child groups `kafka_brokers` / `kafka_controllers`; no secrets (#10, ADR-0002)
 - Output `bootstrap_servers`: broker `<private_ip>:9092` list ordered by node ID (#10)
 - `inventory.tftest.hcl` suite (mock-provider apply) and `inventory.feature` spec: combined, dedicated, no secrets, node-ID ordering with 10 brokers (#10)
+- `kafka-cluster`: optional data volume per broker when `volume_size_gb > 0`: `hcloud_volume` (`<name>-<key>-data`, `format = "xfs"`, `delete_protection = true`, same location) and `hcloud_volume_attachment` (`automount = false`); dedicated controllers never get one (#9)
+- `templates/cloud-init.yaml.tftpl` + `templates/mount-data-volume.sh`: wait up to 120 s for the volume device, `mkfs.xfs` only when `blkid` finds no filesystem (abort on `blkid` errors), `/etc/fstab` entry with `defaults,nofail`, mount `/var/lib/kafka`; `user_data` set only for nodes with a volume (#9)
+- `servers` output gains `volume_id` (`null` without a volume) (#9)
+- `volumes.tftest.hcl` suite and `volumes.feature` spec; terraform-compliance `volumes_policy.feature` (delete protection, xfs, no automount, labels); `tests/cloud-init/test_mount_data_volume.sh`, `make cloud-init-test` and CI `cloud-init-test` job (shellcheck, sh, dash) (#9)
 - `kafka-cluster`: `hcloud_ssh_key` per `ssh_public_keys` entry (`<name>-<key>`) merged with `data.hcloud_ssh_key` lookups for `ssh_key_names`; spread `hcloud_placement_group` per pool (brokers; controllers in dedicated mode); one `hcloud_server` per node (`<name>-<key>`, firewall, placement group, deterministic private IP, public IPv4/IPv6, `ignore_changes = [user_data, image, ssh_keys]`) (#8)
 - Outputs `servers` (id, name, public IPv4/IPv6, private IP per node), `placement_group_ids`, `ssh_keys` (#8)
 - `servers.tftest.hcl` suite and `servers.feature` spec (combined, dedicated, SSH key merge, plan-level 3 -> 4 scale-out, no-key rejection); terraform-compliance `servers_policy.feature` (firewall, placement group, network, spread type, `managed-by` labels) (#8)
@@ -22,6 +26,8 @@ All notable changes to this project will be documented in this file.
 - `LOCK` Makefile variable (default `true`); set `LOCK=false` if Object Storage conditional-write locking is unsupported
 
 ### Changed
+- Test mock providers pin numeric ids for `hcloud_volume` and `hcloud_server` (consumed by `hcloud_volume_attachment`) (#9)
+- CI path filter includes `**/*.tftpl` and `modules/**/*.sh` (#9)
 - `image` input is now wired into `hcloud_server` (tflint ignore removed) (#8)
 - Test mock providers pin numeric ids for `hcloud_firewall` and `hcloud_placement_group` (#8)
 - Makefile retargeted to Hetzner: `LOCATION` (default `fsn1`) replaces `REGION`; params at `params/$(LOCATION)/$(ENVIRONMENT)/`; `prep` passes `-backend-config=.../backend.hcl`; tofu runs in `TF_DIR` (default `examples/complete`)
