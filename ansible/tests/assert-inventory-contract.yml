@@ -67,3 +67,33 @@
             that: "'mounted' in ansible_failed_result.msg"
             fail_msg: "Play failed for a reason other than the expected unmounted-volume check."
             success_msg: "PASS: fstab entry without a live mount correctly fails before Kafka installs."
+
+- name: "Scenario: kafka_node_ip not configured on the host fails before installing Kafka (#13)"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kafka_node_ip: 10.0.1.10
+  tasks:
+    - name: Simulate a host whose private NIC is down, then assert the fail path
+      block:
+        - name: Stub network facts with only the public address (private NIC down)
+          ansible.builtin.set_fact:
+            ansible_facts:
+              all_ipv4_addresses: [203.0.113.10]
+
+        - name: Assert kafka_node_ip is configured on the host (copy of site.yml logic)
+          ansible.builtin.assert:
+            that:
+              - kafka_node_ip in ansible_facts.all_ipv4_addresses
+            fail_msg: "{{ kafka_node_ip }} (kafka_node_ip) is not configured on the host."
+
+        - name: Fail the test file — the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the private-IP assertion to fail when the NIC is down, but it passed."
+      rescue:
+        - name: Confirm the private-IP assertion is what failed
+          ansible.builtin.assert:
+            that: "'kafka_node_ip' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Play failed for a reason other than the expected private-IP assertion."
+            success_msg: "PASS: kafka_node_ip missing from the host correctly fails before Kafka installs."

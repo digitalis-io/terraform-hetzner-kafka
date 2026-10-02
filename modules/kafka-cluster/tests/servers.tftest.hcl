@@ -64,8 +64,17 @@ run "combined_cluster_servers" {
   }
 
   assert {
-    condition     = alltrue([for s in hcloud_server.this : s.image == "ubuntu-24.04" && s.location == "fsn1" && s.user_data == null])
-    error_message = "Servers must use var.image, var.location and no user_data without volumes."
+    condition     = alltrue([for s in hcloud_server.this : s.image == "ubuntu-24.04" && s.location == "fsn1"])
+    error_message = "Servers must use var.image and var.location."
+  }
+
+  assert {
+    condition = alltrue([for s in hcloud_server.this :
+      yamldecode(s.user_data).write_files[0].path == "/etc/netplan/60-hetzner-private.yaml" &&
+      yamldecode(s.user_data).write_files[0].content == file("${path.module}/templates/netplan-private.yaml") &&
+      contains(yamldecode(s.user_data).runcmd, ["netplan", "apply"])
+    ])
+    error_message = "Every server's cloud-init must install the private NIC netplan file and run netplan apply (#13)."
   }
 
   assert {

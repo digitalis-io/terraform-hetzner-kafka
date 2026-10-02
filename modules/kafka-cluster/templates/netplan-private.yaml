@@ -1,0 +1,10 @@
+# Hetzner private network NIC (enp7s0 on x86 and Arm server types).
+# Hetzner attaches the private network after cloud-init has written its own
+# netplan for eth0, so the private NIC would stay DOWN without this file.
+network:
+  version: 2
+  ethernets:
+    hetzner-private:
+      match:
+        name: "enp*"
+      dhcp4: true

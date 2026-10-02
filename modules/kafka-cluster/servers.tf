@@ -21,7 +21,7 @@ resource "hcloud_server" "this" {
   ssh_keys           = local.ssh_keys
   firewall_ids       = [hcloud_firewall.this.id]
   placement_group_id = hcloud_placement_group.this[each.value.role].id
-  user_data          = local.user_data[each.key] # volumes.tf: null unless the node has a volume
+  user_data          = local.user_data[each.key] # cloud_init.tf: private NIC + optional volume mount
   labels             = each.value.labels
 
   # Public IPv4 is required for Ansible SSH and package/agent egress; IPv6 is
