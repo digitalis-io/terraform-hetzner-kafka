@@ -1,0 +1,4 @@
+---
+# Third-party collections installed by ansible-galaxy land under .ansible/.
+exclude_paths:
+  - .ansible/

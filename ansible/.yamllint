@@ -5,6 +5,10 @@ yaml-files:
   - '*.yaml'
   - '*.yml'
   - .yamllint
+# Collections installed by `ansible-galaxy collection install` (CI and
+# local) land under .ansible/; that is third-party code, not ours to lint.
+ignore: |
+  .ansible/
 rules:
   braces: enable
   brackets: enable
