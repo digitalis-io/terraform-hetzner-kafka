@@ -1,6 +1,6 @@
 .EXPORT_ALL_VARIABLES:
 .ONESHELL:
-.PHONY: apply destroy plan prep fmt docs help check-env check-dirs force-init force-unlock console test
+.PHONY: apply destroy plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test
 
 # Multi-step recipes are chained on one shell line (&&, ;) so they behave the
 # same under GNU make 3.81 (macOS, no .ONESHELL) and 4.x.
@@ -44,6 +44,10 @@ TF_VARS          = -var="location=$(LOCATION)" \
 COMPLIANCE_OVERRIDE = $(TF_DIR)/zz_compliance_backend_override.tf
 COMPLIANCE_PLAN     = compliance.plan
 COMPLIANCE_JSON     = $(abspath $(TF_DIR))/compliance.plan.json
+# Features tagged @tofu-test are specifications executed by `tofu test`
+# (module-test); terraform-compliance (radish tag expression) skips them.
+COMPLIANCE_TAGS     ?= not tofu-test
+MODULE_DIR          ?= modules/kafka-cluster
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -109,7 +113,9 @@ force-unlock: prep ## Force-unlock state (TF_FORCE_UNLOCK=<id>)
 test: check-dirs ## Run terraform-compliance against a plan (local backend, -refresh=false)
 	@[ -d "$(FEATURES_DIR)" ] || { printf '\033[0;31m$(FEATURES_DIR) does not exist\033[0m\n'; exit 1; }
 	@[ -n "$(TF_COMPLIANCE)" ] || { printf '\033[0;31mterraform-compliance not found (pip install terraform-compliance)\033[0m\n'; exit 1; }
-	@trap 'rm -f "$(COMPLIANCE_OVERRIDE)"' EXIT; \
+	@if ! grep -L '@tofu-test' $(FEATURES_DIR)/*.feature 2>/dev/null | grep -q .; then \
+		echo "No terraform-compliance features (all tagged @tofu-test); skipping"; exit 0; fi; \
+	trap 'rm -f "$(COMPLIANCE_OVERRIDE)"' EXIT; \
 	printf 'terraform {\n  backend "local" {}\n}\n' > "$(COMPLIANCE_OVERRIDE)" && \
 	$(TOFU) init -reconfigure -input=false && \
 	$(TOFU) plan \
@@ -119,7 +125,11 @@ test: check-dirs ## Run terraform-compliance against a plan (local backend, -ref
 		-out=$(COMPLIANCE_PLAN) \
 		$(TF_VARS) $(EXTRA_OPTS) && \
 	$(TOFU) show -json $(COMPLIANCE_PLAN) > "$(COMPLIANCE_JSON)" && \
-	$(TF_COMPLIANCE) -p "$(COMPLIANCE_JSON)" -f "$(FEATURES_DIR)"
+	$(TF_COMPLIANCE) -p "$(COMPLIANCE_JSON)" -f "$(FEATURES_DIR)" --tags "$(COMPLIANCE_TAGS)"
+
+module-test: ## Run native tofu test suites for the module (plan-only, mocked provider)
+	@$(TOFU_BIN) -chdir=$(MODULE_DIR) init -backend=false -input=false && \
+	$(TOFU_BIN) -chdir=$(MODULE_DIR) test
 
 fmt: ## Format all .tf files
 	@$(TOFU_BIN) fmt -recursive
