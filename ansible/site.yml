@@ -31,6 +31,10 @@
     # Iteration 1 (#11) leaves the AxonOps agent disabled; wired up in
     # Iteration 2 (#15) once key handling/vault wiring lands.
     kafka_axonops_agent_enabled: false
+    # The chrony role (run first) installs and configures NTP, so the
+    # preflight NTP check is redundant; its "Check for Chrony installation"
+    # task also reports changed on every run, breaking idempotence.
+    preflight_check_ntp: false
 
   pre_tasks:
     - name: Assert every Kafka host declares kafka_node_id, kafka_node_roles and kafka_node_ip

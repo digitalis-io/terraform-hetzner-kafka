@@ -9,11 +9,11 @@
 # Range is the 0.6.x line: the role contract this playbook was written
 # against (kafka role defaults, task names, inventory keys as of 0.6.3).
 #
-# ansible.posix / community.general / community.crypto / community.docker /
-# kubernetes.core are axonops.axonops's own role dependencies (see
-# axonops/axonops-ansible-collection galaxy.yml). Pin ansible.posix and
-# community.general explicitly since the kafka/chrony/preflight roles call
-# modules from both directly; the rest resolve transitively.
+# The chrony/preflight/kafka roles call modules from ansible.posix,
+# community.general and community.crypto (kafka TLS tasks). Pin all three
+# explicitly: the Galaxy release of axonops.axonops does not pull them in
+# reliably (CI failed on a missing community.crypto). community.docker and
+# kubernetes.core are only used by roles this playbook does not run.
 collections:
   - name: axonops.axonops
     version: ">=0.6.3,<0.7.0"
@@ -21,3 +21,5 @@ collections:
     version: ">=1.5.0,<3.0.0"
   - name: community.general
     version: ">=8.0.0,<14.0.0"
+  - name: community.crypto
+    version: ">=2.0.0,<4.0.0"

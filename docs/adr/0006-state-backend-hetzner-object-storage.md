@@ -1,6 +1,6 @@
 # ADR-0006: Remote state on Hetzner Object Storage
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0007
 - **Date:** 2026-10-02
 - **Owner:** Platform engineering
 - **Tickets:** #4, #5

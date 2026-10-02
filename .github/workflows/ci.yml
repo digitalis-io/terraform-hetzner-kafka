@@ -78,7 +78,7 @@ jobs:
       - name: tofu validate (examples/complete)
         working-directory: ${{ env.TF_DIR }}
         run: |
-          tofu init -backend=false -input=false -lockfile=readonly
+          tofu init -backend=false -input=false
           tofu validate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -202,7 +202,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ansible-core==2.17.* "molecule==25.*" "molecule-plugins[docker]==23.*" docker
-      - run: ansible-galaxy collection install -r requirements.yml
+      # Install into ~/.ansible/collections: molecule runs its own playbooks
+      # with its own collections path, which does not include ansible/.ansible.
+      - run: ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
+      # Test-only: molecule's docker driver playbooks use community.docker.
+      - run: ansible-galaxy collection install "community.docker:>=3.0.0,<5.0.0" -p ~/.ansible/collections
       - run: molecule test
         env:
           PY_COLORS: "1"

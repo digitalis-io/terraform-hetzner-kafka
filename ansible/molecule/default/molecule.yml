@@ -16,6 +16,9 @@ platforms:
   - name: kafka-combined-1
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
@@ -27,6 +30,9 @@ platforms:
   - name: kafka-combined-2
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
@@ -38,6 +44,9 @@ platforms:
   - name: kafka-combined-3
     image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
     privileged: true
     cgroupns_mode: host
     volumes:
@@ -58,6 +67,9 @@ provisioner:
         kafka_start_on_boot: false
         kafka_java_install: true
         kafka_axonops_agent_enabled: false
+        # Containers share the CI runner's kernel and see its swap; Hetzner
+        # images have none, so the check stays on for real runs.
+        preflight_check_swap: false
     host_vars:
       # kafka_node_ip templates against the container's own facts (Ansible
       # evaluates host_vars Jinja per host at inventory-parse time) since

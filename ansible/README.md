@@ -1,3 +1,13 @@
+<p align="center">
+  <a href="https://digitalis.io">
+    <img src="https://digitalis-marketplace-assets.s3.us-east-1.amazonaws.com/DigitalisDigital_DigitalisFullLogoGradient+-+medium.png" alt="Digitalis.IO" width="300">
+  </a>
+</p>
+
+<p align="center">
+  <em>Built and maintained by <a href="https://digitalis.io">Digitalis.IO</a>: Apache Kafka experts, 24x7 managed services and consultancy</em>
+</p>
+
 # ansible/
 
 Configures the Kafka KRaft cluster provisioned by `modules/kafka-cluster`
@@ -45,3 +55,9 @@ Replication factors (`kafka_replication_factor`,
 `groups['kafka_brokers'] | length`, not from the play's full host count —
 dedicated controllers (ADR-0003) hold no partition data, so sizing against
 `groups['kafka']` would overstate how many replicas can actually exist.
+
+## Contact
+
+This project is maintained by [Digitalis.io](https://digitalis.io), providing
+managed services and consultancy for Apache Kafka. For support, visit
+[digitalis.io/contact](https://digitalis.io/contact).

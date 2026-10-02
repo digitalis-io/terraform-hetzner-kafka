@@ -24,3 +24,4 @@ override.tf.json
 .DS_Store
 .env
 .env.*
+ansible/.ansible/

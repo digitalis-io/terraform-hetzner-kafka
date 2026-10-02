@@ -109,7 +109,7 @@ GitHub Actions: `tofu fmt -check`, `tofu validate`, tflint, trivy, terraform-com
 
 ### State
 
-Remote S3-compatible backend on Hetzner Object Storage for the example root (ADR-0006). The module itself declares no backend.
+Local state by default; a remote S3-compatible backend (e.g. Hetzner Object Storage) is recommended and enabled by uncommenting `backend "s3" {}` in `examples/complete/backend.tf` (ADR-0007, superseding ADR-0006). The module itself declares no backend.
 
 ## 4. Technology decisions
 
@@ -120,7 +120,8 @@ Remote S3-compatible backend on Hetzner Object Storage for the example root (ADR
 | [0003](adr/0003-single-module-node-map-topology.md) | Single module, internal node map, combined or dedicated controllers |
 | [0004](adr/0004-private-network-kafka.md) | Kafka on private network only; public firewall allows SSH only |
 | [0005](adr/0005-optional-volume-storage.md) | Optional Hetzner volume per broker, mounted by cloud-init |
-| [0006](adr/0006-state-backend-hetzner-object-storage.md) | Remote state on Hetzner Object Storage (S3 backend) |
+| [0007](adr/0007-local-state-default-s3-recommended.md) | Local state by default; S3 remote state recommended (supersedes 0006) |
+| [0006](adr/0006-state-backend-hetzner-object-storage.md) | Superseded by 0007. Remote state on Hetzner Object Storage (S3 backend) |
 
 ## 5. Risks
 
