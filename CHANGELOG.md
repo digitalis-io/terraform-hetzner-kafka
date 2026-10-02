@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Added
+- `kafka-cluster`: output `inventory`, a YAML Ansible inventory (`templates/inventory.yaml.tftpl` + `yamlencode`): group `kafka` with one host per server (`ansible_host` public IPv4, `ansible_user: root`, `kafka_node_id`, `kafka_node_roles`, `kafka_node_ip` private IP), group var `kafka_axonops_cluster_name`, child groups `kafka_brokers` / `kafka_controllers`; no secrets (#10, ADR-0002)
+- Output `bootstrap_servers`: broker `<private_ip>:9092` list ordered by node ID (#10)
+- `inventory.tftest.hcl` suite (mock-provider apply) and `inventory.feature` spec: combined, dedicated, no secrets, node-ID ordering with 10 brokers (#10)
 - `kafka-cluster`: `hcloud_ssh_key` per `ssh_public_keys` entry (`<name>-<key>`) merged with `data.hcloud_ssh_key` lookups for `ssh_key_names`; spread `hcloud_placement_group` per pool (brokers; controllers in dedicated mode); one `hcloud_server` per node (`<name>-<key>`, firewall, placement group, deterministic private IP, public IPv4/IPv6, `ignore_changes = [user_data, image, ssh_keys]`) (#8)
 - Outputs `servers` (id, name, public IPv4/IPv6, private IP per node), `placement_group_ids`, `ssh_keys` (#8)
 - `servers.tftest.hcl` suite and `servers.feature` spec (combined, dedicated, SSH key merge, plan-level 3 -> 4 scale-out, no-key rejection); terraform-compliance `servers_policy.feature` (firewall, placement group, network, spread type, `managed-by` labels) (#8)

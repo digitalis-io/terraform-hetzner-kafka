@@ -64,3 +64,16 @@ output "ssh_keys" {
   description = "Names of every SSH key injected into the servers: ssh_key_names as given, then the keys created from ssh_public_keys (<name>-<key>)."
   value       = local.ssh_keys
 }
+
+output "inventory" {
+  description = "Ansible YAML inventory (ADR-0002): group kafka with one host per server (ansible_host = public IPv4, ansible_user = root, kafka_node_id, kafka_node_roles, kafka_node_ip = private IP), group var kafka_axonops_cluster_name, and child groups kafka_brokers / kafka_controllers. Contains no secrets."
+  value = templatefile("${path.module}/templates/inventory.yaml.tftpl", {
+    cluster_name = var.name
+    inventory    = local.inventory
+  })
+}
+
+output "bootstrap_servers" {
+  description = "Comma-separated Kafka bootstrap servers (<private_ip>:9092) of every node with the broker role, ordered by node ID. Reachable from the private network only."
+  value       = local.bootstrap_servers
+}
