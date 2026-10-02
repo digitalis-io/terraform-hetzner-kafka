@@ -16,6 +16,14 @@ mock_provider "hcloud" {
   mock_resource "hcloud_placement_group" {
     defaults = { id = "3001" }
   }
+  # Consumed by hcloud_volume_attachment.volume_id / server_id when
+  # volume_size_gb > 0.
+  mock_resource "hcloud_volume" {
+    defaults = { id = "4001" }
+  }
+  mock_resource "hcloud_server" {
+    defaults = { id = "5001" }
+  }
 }
 
 variables {

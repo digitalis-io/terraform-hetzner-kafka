@@ -5,7 +5,8 @@
 mock_provider "hcloud" {
   # These ids are numeric strings; the generated mock id is random text, which
   # the numeric arguments that consume them (hcloud_network_subnet.network_id,
-  # hcloud_server.network_id / firewall_ids / placement_group_id) reject.
+  # hcloud_server.network_id / firewall_ids / placement_group_id,
+  # hcloud_volume_attachment.volume_id / server_id) reject.
   mock_resource "hcloud_network" {
     defaults = { id = "1001" }
   }
@@ -14,6 +15,12 @@ mock_provider "hcloud" {
   }
   mock_resource "hcloud_placement_group" {
     defaults = { id = "3001" }
+  }
+  mock_resource "hcloud_volume" {
+    defaults = { id = "4001" }
+  }
+  mock_resource "hcloud_server" {
+    defaults = { id = "5001" }
   }
 }
 
