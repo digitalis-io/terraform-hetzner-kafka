@@ -1,0 +1,45 @@
+---
+# Realises tests/features/secure-cluster.feature scenarios "Secure cluster"
+# and "Unauthenticated client rejected" (#14).
+- name: "Scenario: Secure cluster — every listener uses SASL_SSL"
+  hosts: all
+  # Facts are needed: kafka_node_ip is templated from ansible_default_ipv4
+  # and smoke-test.yml reads it for every broker through hostvars.
+  gather_facts: true
+  vars:
+    kafka__verify_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/server.properties"
+  tasks:
+    - name: Check kafka.service is active
+      ansible.builtin.systemd:
+        name: kafka
+      register: kafka__reg_service
+      check_mode: false
+
+    - name: Then kafka.service is active
+      ansible.builtin.assert:
+        that:
+          - kafka__reg_service.status.ActiveState == 'active'
+        fail_msg: "kafka.service is not active on {{ inventory_hostname }}."
+
+    - name: Read server.properties
+      ansible.builtin.slurp:
+        src: "{{ kafka__verify_props }}"
+      register: kafka__reg_props
+
+    - name: Then the broker and controller listeners use SASL_SSL
+      vars:
+        kafka__props_lines: "{{ (kafka__reg_props.content | b64decode).splitlines() }}"
+      ansible.builtin.assert:
+        that:
+          - "'listeners=SASL_SSL://:9092,CONTROLLER://:9093' in kafka__props_lines"
+          - "'inter.broker.listener.name=SASL_SSL' in kafka__props_lines"
+          - kafka__props_lines | select('match', '^listener.security.protocol.map=CONTROLLER:SASL_SSL,') | list | length == 1
+          - "'authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer' in kafka__props_lines"
+          - "'allow.everyone.if.no.acl.found=false' in kafka__props_lines"
+        fail_msg: "server.properties on {{ inventory_hostname }} is not configured for SASL_SSL with ACLs."
+
+# Produces and consumes over SASL_SSL, checks that a TLS client without
+# SASL credentials is refused, and that app1 (SCRAM user, no ACLs) is
+# denied by the authorizer.
+- name: "Scenario: Secure cluster — smoke test over SASL_SSL"
+  ansible.builtin.import_playbook: ../../smoke-test.yml

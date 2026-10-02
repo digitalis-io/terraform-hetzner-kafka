@@ -25,3 +25,8 @@ override.tf.json
 .env
 .env.*
 ansible/.ansible/
+# Kafka TLS material from `make certs` (ADR-0008) and the Vault secrets file.
+ansible/tls/
+ansible/group_vars/kafka/vault.yml
+# Fake inventory for CI syntax-check / ansible-lint (not a real cluster).
+!ansible/tests/inventory.yml

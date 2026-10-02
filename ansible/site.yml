@@ -2,7 +2,8 @@
 # Configures the Hetzner-provisioned KRaft Kafka cluster (OpenTofu
 # modules/kafka-cluster, #10) with the axonops.axonops collection.
 #
-# Out of scope (Iteration 2, #15): TLS, SASL, ACLs, AxonOps agent.
+# TLS, SASL/SCRAM and ACLs are switched on through group_vars/kafka
+# (#14, ADR-0008). Out of scope (#15): AxonOps agent.
 - name: Configure Kafka cluster
   hosts: kafka
   become: true
@@ -51,6 +52,78 @@
           host. The kafka role itself only fails at package-install time, by
           which point packages are already on disk; this assertion fails the
           play before any installation happens.
+      tags: always
+
+    # #14 (ADR-0008): the role checks SASL credentials and TLS paths only in
+    # its security tasks, after Java and Kafka are already installed. Check
+    # them here instead, before any host changes. A missing Vault password
+    # fails even earlier: Ansible cannot load the encrypted vault.yml.
+    - name: Assert SASL passwords are set when SASL is enabled
+      ansible.builtin.assert:
+        that:
+          - kafka_sasl_inter_broker_password | default('') | string | length >= 16
+          - kafka_sasl_inter_broker_password | default('') != 'CHANGE_ME'
+          - kafka_sasl_users | default([]) | rejectattr('password', 'defined') | list | length == 0
+          - kafka_sasl_users | default([]) | map(attribute='password') | map('string') | select('match', '^.{0,15}$') | list | length == 0
+          - "'CHANGE_ME' not in (kafka_sasl_users | default([]) | map(attribute='password') | list)"
+          # The role puts passwords inside kafka-storage.sh --add-scram
+          # 'SCRAM-SHA-512=[name=..,password=..]' and JAAS "..." quoting:
+          # ',', ']', '"' or '=' would break them.
+          - kafka_sasl_inter_broker_password | default('') | string is match('^[A-Za-z0-9._~-]+$')
+          - kafka_sasl_users | default([]) | map(attribute='password') | map('string') | reject('match', '^[A-Za-z0-9._~-]+$') | list | length == 0
+        fail_msg: >-
+          SASL is enabled but kafka_sasl_inter_broker_password or a
+          kafka_sasl_users password is missing, shorter than 16 characters,
+          still CHANGE_ME, or uses characters outside A-Z a-z 0-9 . _ ~ -
+          (generate one with `openssl rand -hex 24`). Set them in group_vars/kafka/vault.yml (copy
+          vault.yml.example), encrypt it with ansible-vault, and supply the
+          Vault password (ANSIBLE_VAULT_PASSWORD_FILE or --ask-vault-pass).
+        quiet: true
+      when:
+        - kafka_security_enabled | default(false) | bool
+        - kafka_sasl_enabled | default(false) | bool
+      tags: always
+
+    # A plaintext vault.yml would put real passwords on disk unencrypted
+    # (and one `git add -f` away from the repository).
+    - name: Read the first line of group_vars/kafka/vault.yml on the control node
+      ansible.builtin.command:
+        cmd: head -n 1 {{ playbook_dir }}/group_vars/kafka/vault.yml
+      register: kafka__reg_vault_header
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      delegate_to: localhost
+      become: false
+      run_once: true
+      tags: always
+
+    - name: Fail if group_vars/kafka/vault.yml is not encrypted
+      ansible.builtin.fail:
+        msg: >-
+          group_vars/kafka/vault.yml exists but is not encrypted. Run
+          `ansible-vault encrypt ansible/group_vars/kafka/vault.yml`, then
+          re-run with ANSIBLE_VAULT_PASSWORD_FILE set or --ask-vault-pass.
+      when:
+        - kafka__reg_vault_header.rc == 0
+        - not kafka__reg_vault_header.stdout.startswith('$ANSIBLE_VAULT')
+      run_once: true
+      tags: always
+
+    - name: Assert TLS files exist on the control node (custom mode)
+      ansible.builtin.assert:
+        that:
+          - kafka_tls_cert | default('') is file
+          - kafka_tls_key | default('') is file
+          - kafka_tls_ca | default('') is file
+        fail_msg: >-
+          TLS custom mode needs kafka_tls_cert, kafka_tls_key and kafka_tls_ca
+          on the control node for {{ inventory_hostname }}. Run `make certs`
+          to create them in ansible/tls/ (ADR-0008).
+      when:
+        - kafka_security_enabled | default(false) | bool
+        - kafka_tls_enabled | default(false) | bool
+        - kafka_tls_mode | default('custom') == 'custom'
       tags: always
 
     # #13: Hetzner attaches the private network after cloud-init has written
@@ -154,9 +227,19 @@
           {{ ('--bootstrap-server ' ~ kafka_node_ip ~ ':9092')
              if 'broker' in kafka_node_roles
              else ('--bootstrap-controller ' ~ kafka_node_ip ~ ':9093') }}
+          {{ ('--command-config ' ~ (kafka__site_admin_props
+                                       if 'broker' in kafka_node_roles
+                                       else kafka__site_controller_admin_props))
+             if kafka_security_enabled | default(false) | bool else '' }}
           describe --status
       vars:
         kafka__site_bin_dir: "{{ kafka_install_root | default('/opt') }}/kafka/bin"
+        # Written by the kafka role when security is on (same TLS/SASL
+        # settings as the listeners, inter-broker super user).
+        kafka__site_admin_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/admin.properties"
+        # Controller-only nodes are queried on the CONTROLLER listener, which
+        # always uses SASL PLAIN (axonops-ansible-collection#157).
+        kafka__site_controller_admin_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/controller-admin.properties"
       register: kafka__reg_quorum
       changed_when: false
       retries: 30

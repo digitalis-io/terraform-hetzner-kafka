@@ -1,0 +1,112 @@
+---
+# Creates the TLS material for kafka_tls_mode: custom (ADR-0008): one
+# project CA plus one certificate per inventory host, signed by that CA.
+#
+# Runs entirely on the control node (delegate_to: localhost); it reads
+# kafka_node_ip from the inventory but never connects to the hosts.
+# Idempotent: existing keys and certificates are kept, so re-running after
+# a scale-out signs only the new hosts with the same CA.
+#
+# Output (gitignored): {{ kafka_tls_certs_dir }}/
+#   ca.key, ca.crt                     project CA (protect ca.key)
+#   <host>.key, <host>.csr, <host>.crt per-host material
+#
+# Keep ca.key: signing a new host after a scale-out needs it. If you move
+# it offline, restore it before running this playbook again.
+#
+# Run: make certs   (or ansible-playbook -i ../inventory.yml certs.yml)
+- name: Create the Kafka TLS CA and per-host certificates
+  hosts: kafka
+  gather_facts: false
+  vars:
+    kafka_tls_certs_dir: "{{ playbook_dir }}/tls"
+    kafka_tls_ca_cn: "{{ kafka_axonops_cluster_name | default('kafka') }} Kafka CA"
+    kafka_tls_ca_validity_days: 3650
+    kafka_tls_host_validity_days: 825
+
+  tasks:
+    - name: Assert every host declares kafka_node_ip (used as the certificate SAN)
+      ansible.builtin.assert:
+        that:
+          - kafka_node_ip is defined
+        fail_msg: >-
+          {{ inventory_hostname }} has no kafka_node_ip. Use the inventory
+          written by OpenTofu (make apply or make inventory).
+
+    - name: Create the certificate directory
+      ansible.builtin.file:
+        path: "{{ kafka_tls_certs_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Create the CA private key
+      community.crypto.openssl_privatekey:
+        path: "{{ kafka_tls_certs_dir }}/ca.key"
+        type: RSA
+        size: 3072
+        format: pkcs8
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Create the CA certificate signing request
+      community.crypto.openssl_csr:
+        path: "{{ kafka_tls_certs_dir }}/ca.csr"
+        privatekey_path: "{{ kafka_tls_certs_dir }}/ca.key"
+        common_name: "{{ kafka_tls_ca_cn }}"
+        basic_constraints: ["CA:TRUE", "pathlen:0"]
+        basic_constraints_critical: true
+        key_usage: [keyCertSign, cRLSign]
+        key_usage_critical: true
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Self-sign the CA certificate
+      community.crypto.x509_certificate:
+        path: "{{ kafka_tls_certs_dir }}/ca.crt"
+        csr_path: "{{ kafka_tls_certs_dir }}/ca.csr"
+        privatekey_path: "{{ kafka_tls_certs_dir }}/ca.key"
+        provider: selfsigned
+        selfsigned_not_after: "+{{ kafka_tls_ca_validity_days }}d"
+        mode: "0644"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Create the host private key
+      community.crypto.openssl_privatekey:
+        path: "{{ kafka_tls_certs_dir }}/{{ inventory_hostname }}.key"
+        type: RSA
+        size: 3072
+        # Kafka's PEM keystore needs PKCS#8 (the role also converts).
+        format: pkcs8
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Create the host certificate signing request
+      community.crypto.openssl_csr:
+        path: "{{ kafka_tls_certs_dir }}/{{ inventory_hostname }}.csr"
+        privatekey_path: "{{ kafka_tls_certs_dir }}/{{ inventory_hostname }}.key"
+        common_name: "{{ inventory_hostname }}"
+        subject_alt_name:
+          - "DNS:{{ inventory_hostname }}"
+          - "IP:{{ kafka_node_ip }}"
+        basic_constraints: ["CA:FALSE"]
+        basic_constraints_critical: true
+        extended_key_usage: [serverAuth, clientAuth]
+        key_usage: [digitalSignature, keyEncipherment]
+        mode: "0600"
+      delegate_to: localhost
+
+    - name: Sign the host certificate with the project CA
+      community.crypto.x509_certificate:
+        path: "{{ kafka_tls_certs_dir }}/{{ inventory_hostname }}.crt"
+        csr_path: "{{ kafka_tls_certs_dir }}/{{ inventory_hostname }}.csr"
+        provider: ownca
+        ownca_path: "{{ kafka_tls_certs_dir }}/ca.crt"
+        ownca_privatekey_path: "{{ kafka_tls_certs_dir }}/ca.key"
+        ownca_not_after: "+{{ kafka_tls_host_validity_days }}d"
+        mode: "0644"
+      delegate_to: localhost

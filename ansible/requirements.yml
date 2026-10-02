@@ -15,8 +15,13 @@
 # reliably (CI failed on a missing community.crypto). community.docker and
 # kubernetes.core are only used by roles this playbook does not run.
 collections:
-  - name: axonops.axonops
-    version: ">=0.6.3,<0.7.0"
+  # TEMPORARY (#14): axonops/axonops-ansible-collection#157 fix (KRaft
+  # controller listener uses SASL PLAIN; idempotent ACLs) is not released
+  # yet. Revert to the Galaxy pin of the first release that contains it
+  # before merging.
+  - name: https://github.com/axonops/axonops-ansible-collection.git
+    type: git
+    version: fix/kafka-controller-sasl-plain
   - name: ansible.posix
     version: ">=1.5.0,<3.0.0"
   - name: community.general

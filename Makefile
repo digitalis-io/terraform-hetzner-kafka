@@ -1,7 +1,7 @@
 .EXPORT_ALL_VARIABLES:
 .ONESHELL:
 .PHONY: apply destroy check-confirm plan prep fmt docs help check-env check-dirs force-init force-unlock console test module-test cloud-init-test \
-        inventory galaxy ping configure smoke-test lint check-inventory check-ansible
+        inventory galaxy ping certs configure smoke-test lint check-inventory check-ansible
 
 # Multi-step recipes are chained on one shell line (&&, ;) so they behave the
 # same under GNU make 3.81 (macOS, no .ONESHELL) and 4.x.
@@ -61,6 +61,12 @@ ANSIBLE_DIR         ?= ansible
 ANSIBLE_CONFIG      ?= $(ANSIBLE_DIR)/ansible.cfg
 ANSIBLE_BIN         := $(shell command -v ansible 2>/dev/null)
 ANSIBLE_OPTS        ?=
+# Ansible Vault (#14). With ANSIBLE_VAULT_PASSWORD_FILE exported, Ansible
+# reads the password from it; otherwise ask for it when vault.yml is
+# encrypted. Without the password, Ansible fails before touching any host.
+VAULT_FILE          ?= $(ANSIBLE_DIR)/group_vars/kafka/vault.yml
+VAULT_ENCRYPTED     := $(shell head -n 1 "$(VAULT_FILE)" 2>/dev/null | grep -q '^\$$ANSIBLE_VAULT' && echo yes)
+VAULT_OPTS          ?= $(if $(ANSIBLE_VAULT_PASSWORD_FILE),,$(if $(VAULT_ENCRYPTED),--ask-vault-pass,))
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -170,13 +176,16 @@ galaxy: check-ansible ## Install Ansible collections from ansible/requirements.y
 	@ansible-galaxy collection install -r $(ANSIBLE_DIR)/requirements.yml
 
 ping: check-inventory check-ansible ## Check SSH reachability of every Kafka node
-	@ansible -i $(INVENTORY) kafka -m ansible.builtin.ping $(ANSIBLE_OPTS)
+	@ansible -i $(INVENTORY) kafka -m ansible.builtin.ping $(VAULT_OPTS) $(ANSIBLE_OPTS)
+
+certs: check-inventory check-ansible ## Create the Kafka TLS CA and per-host certificates in ansible/tls/ (ADR-0008)
+	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/certs.yml $(VAULT_OPTS) $(ANSIBLE_OPTS)
 
 configure: check-inventory check-ansible ## Install and configure Kafka (ansible/site.yml)
-	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/site.yml $(ANSIBLE_OPTS)
+	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/site.yml $(VAULT_OPTS) $(ANSIBLE_OPTS)
 
 smoke-test: check-inventory check-ansible ## Produce/consume a test message over the private network
-	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/smoke-test.yml $(ANSIBLE_OPTS)
+	@ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/smoke-test.yml $(VAULT_OPTS) $(ANSIBLE_OPTS)
 
 lint: ## Run every pre-commit hook (fmt, validate, tflint, trivy, docs)
 	@pre-commit run --all-files
