@@ -89,8 +89,8 @@ kafka_sasl_users: "{{ vault_kafka_sasl_users | default([]) }}"
 kafka_acl_enabled: true
 # Deny by default: a user with no matching ACL gets nothing.
 kafka_acl_allow_everyone_if_no_acl: false
-# The role re-applies every rule on each run and reports it as changed.
-# Rules removed from this list are NOT removed from the cluster.
+# The role adds only missing rules. Rules removed from this list are NOT
+# removed from the cluster.
 # Example: app1 may produce and consume topics prefixed "app1." and use
 # consumer groups prefixed "app1.".
 kafka_acls:

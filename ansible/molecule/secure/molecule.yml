@@ -86,10 +86,11 @@ provisioner:
             password: molecule-fixture-app1-0001
         kafka_acl_enabled: true
         kafka_acl_allow_everyone_if_no_acl: false
-        # No kafka_acls rules here: the role's ACL task always reports
-        # changed, which would fail the idempotence step. The authorizer
-        # itself is on (deny by default) and verify.yml checks it.
-        kafka_acls: []
+        # One rule on the app1. prefix: exercises the role's ACL task (and its
+        # idempotence). app1 still has no ACL on the smoke-test topic, so
+        # smoke-test.yml's deny-by-default check holds.
+        kafka_acls:
+          - {principal: "User:app1", operation: Write, resource_type: Topic, resource_name: "app1.", pattern_type: PREFIXED}
     host_vars:
       # kafka_node_ip templates against the container's own facts (Ansible
       # evaluates host_vars Jinja per host at inventory-parse time) since

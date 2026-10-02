@@ -227,7 +227,9 @@
           {{ ('--bootstrap-server ' ~ kafka_node_ip ~ ':9092')
              if 'broker' in kafka_node_roles
              else ('--bootstrap-controller ' ~ kafka_node_ip ~ ':9093') }}
-          {{ ('--command-config ' ~ kafka__site_admin_props)
+          {{ ('--command-config ' ~ (kafka__site_admin_props
+                                       if 'broker' in kafka_node_roles
+                                       else kafka__site_controller_admin_props))
              if kafka_security_enabled | default(false) | bool else '' }}
           describe --status
       vars:
@@ -235,6 +237,9 @@
         # Written by the kafka role when security is on (same TLS/SASL
         # settings as the listeners, inter-broker super user).
         kafka__site_admin_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/admin.properties"
+        # Controller-only nodes are queried on the CONTROLLER listener, which
+        # always uses SASL PLAIN (axonops-ansible-collection#157).
+        kafka__site_controller_admin_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/controller-admin.properties"
       register: kafka__reg_quorum
       changed_when: false
       retries: 30

@@ -56,7 +56,10 @@ From the repository root the same steps are `make certs configure smoke-test`.
 
 The example `vars.yml` turns on TLS, SASL/SCRAM-SHA-512 and ACLs. Every
 listener (9092 clients and inter-broker, 9093 controllers) becomes
-`SASL_SSL`. Design and trade-offs: [ADR-0008](../docs/adr/0008-kafka-tls-certificate-source.md).
+`SASL_SSL`. Clients and brokers authenticate with SCRAM-SHA-512 on 9092;
+the controller listener (9093) uses SASL PLAIN over TLS with the
+inter-broker identity, because KRaft controllers cannot authenticate each
+other with SCRAM. Design and trade-offs: [ADR-0008](../docs/adr/0008-kafka-tls-certificate-source.md).
 
 | Setting | Example value | Why |
 |---------|---------------|-----|

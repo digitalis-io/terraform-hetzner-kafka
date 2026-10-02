@@ -16,6 +16,7 @@ The MVP runs Kafka with PLAINTEXT listeners on the Hetzner private network (ADR-
 ## Decision
 - The example enables TLS, SASL/SCRAM-SHA-512 and ACLs (`SASL_SSL` on 9092 and 9093).
 - TLS uses `kafka_tls_mode: custom`. `make certs` runs `ansible/certs.yml`, which uses `community.crypto` (already a dependency) to create a project CA and one certificate per inventory host. The SANs are the private IP (`kafka_node_ip`) and the inventory hostname. Output goes to `ansible/tls/`, which is gitignored. The playbook is idempotent: re-running it after a scale-out signs only the new hosts.
+- The KRaft CONTROLLER listener (9093) uses SASL PLAIN over TLS with the inter-broker identity, set by the role: KRaft controllers cannot authenticate each other with SCRAM (axonops/axonops-ansible-collection#157). Clients and inter-broker traffic on 9092 use SCRAM-SHA-512.
 - `kafka_tls_client_auth: none`. SASL/SCRAM authenticates clients and TLS encrypts traffic. Clients do not need their own certificates.
 - Secrets (inter-broker password, application users) live in `ansible/group_vars/kafka/vault.yml`, encrypted with Ansible Vault. `site.yml` checks for the secrets before it changes any host.
 - `generate` stays available for disposable test clusters (molecule). `pki_agent` remains an option for teams that already run the AxonOps PKI agent.
