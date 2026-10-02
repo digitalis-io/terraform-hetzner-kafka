@@ -20,10 +20,6 @@
   vars:
     kafka_smoke_brokers: "{{ groups['kafka_brokers'] }}"
     kafka_smoke_bin_dir: "{{ kafka_install_root | default('/opt') }}/kafka/bin"
-    # gather_facts is false (no need for this play), so build the unique
-    # suffix from a pipe lookup rather than ansible_date_time.
-    kafka_smoke_topic: "smoke-test-{{ lookup('pipe', 'date +%s%N') }}"
-    kafka_smoke_message: "smoke-test-message-{{ kafka_smoke_topic }}"
     kafka_smoke_replication_factor: "{{ [kafka_smoke_brokers | length, 3] | min }}"
     # Private IPs only (ADR-0004) — never ansible_host (public IP).
     kafka_smoke_bootstrap_servers: >-
@@ -36,6 +32,20 @@
     ansible_remote_tmp: /tmp/.ansible_kafka
 
   tasks:
+    # set_fact, not play vars: play vars are evaluated lazily on every
+    # reference, so a lookup('pipe', 'date ...') there gave the create,
+    # produce, consume and delete tasks four different topic names (#13).
+    - name: Pick a unique topic name and message for this run
+      ansible.builtin.set_fact:
+        # now() + random: portable (BSD date on macOS has no %N).
+        kafka_smoke_topic: "smoke-test-{{ now(utc=true).strftime('%Y%m%d%H%M%S') }}-{{ 999999 | random }}"
+      tags: always
+
+    - name: Derive the test message from the fixed topic name
+      ansible.builtin.set_fact:
+        kafka_smoke_message: "smoke-test-message-{{ kafka_smoke_topic }}"
+      tags: always
+
     - name: Produce, consume and verify a message, always cleaning up the test topic
       block:
         - name: Create the smoke-test topic
@@ -59,6 +69,9 @@
               {{ kafka_smoke_bin_dir }}/kafka-console-producer.sh
               --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
               --topic {{ kafka_smoke_topic }}
+              --sync
+              --producer-property acks=all
+              --producer-property max.block.ms=30000
             executable: /bin/bash
           changed_when: true
 
