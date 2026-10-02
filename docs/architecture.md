@@ -76,28 +76,27 @@ flowchart LR
 | `hcloud_firewall` | Applied to every node. Inbound SSH (22/tcp) from `ssh_allowed_cidrs`; ICMP optional. All other public inbound denied. Private network traffic is not filtered by Hetzner firewalls. |
 | `hcloud_placement_group` | One `spread` group per pool (brokers, controllers). Limit 10 servers per group. |
 | `hcloud_server` | `for_each = local.nodes`. Public IPv4 kept for SSH and package egress. Attached to subnet with deterministic private IP. |
-| `hcloud_volume` + attachment | Created only when `volume_size_gb > 0`; one per broker. Mounted at `/var/lib/kafka` by cloud-init. `delete_protection` on by default. |
+| `hcloud_volume` + attachment | Created only when `volume_size_gb > 0`; one per broker. cloud-init waits up to 120 s for the device, then mounts it at `/var/lib/kafka` with `defaults,nofail`. `delete_protection` on by default. |
 | `hcloud_ssh_key` | Created from `ssh_public_keys`; merged with existing `ssh_key_names`. |
 | Inventory template | YAML inventory: group `kafka`, per-host `ansible_host` (public IP), `kafka_node_ip` (private IP), `kafka_node_id`, `kafka_node_roles`. |
 
 ### Topology and node IDs
 
 - **Combined** (`dedicated_controllers = false`): `broker_count` nodes. The first `controller_count` brokers (default 3, or 1 when `broker_count < 3`) run `[broker, controller]`; the rest run `[broker]`. Node IDs 1..N.
-- **Dedicated** (`dedicated_controllers = true`): `controller_count` (3 or 5) controller-only nodes with IDs 1..N; brokers with IDs 101..N.
+- **Dedicated** (`dedicated_controllers = true`): `controller_count` (3 or 5) controller-only nodes with IDs 1..N; broker IDs 101..(100+broker_count).
 - `controller_count` must be odd (1, 3, 5). Keys are stable (`broker-1`, `controller-1`), so changing counts adds or removes only the tail nodes.
 - KRaft uses static `controller.quorum.voters` in the role. Changing controller membership after first boot is unsupported in MVP and documented as such.
 
 ### Data flow
 
 1. `make apply` creates infrastructure and renders `inventory.yml` (no secrets).
-2. `make galaxy configure` runs `ansible-galaxy collection install -r ansible/requirements.yml` and `ansible-playbook -i inventory.yml ansible/site.yml`.
+2. `make galaxy configure` runs `ansible-galaxy collection install -r ansible/requirements.yml` and `ansible-playbook -i inventory.yml ansible/site.yml`. The kafka role formats KRaft storage, starts services, and (optionally) installs the AxonOps agent.
 3. `make smoke-test` produces and consumes a test message over the private network.
-3. The kafka role formats KRaft storage, starts services, and (optionally) installs the AxonOps agent.
 
 ### AuthN / AuthZ
 
 - Hetzner API token via `HCLOUD_TOKEN` environment variable only.
-- SSH key-based root access for Ansible; password auth disabled by Hetzner image defaults when keys are set.
+- SSH key-based root access for Ansible; no root password set when SSH keys are supplied; sshd hardening is out of scope for MVP.
 - Kafka: PLAINTEXT on the private network in MVP. TLS + SASL/SCRAM in Iteration 2. Secrets (SASL passwords, AxonOps key) live in Ansible Vault, never in Terraform state.
 
 ### Observability
@@ -130,8 +129,8 @@ Remote S3-compatible backend on Hetzner Object Storage for the example root (ADR
 | Kafka binds `:9092` on all interfaces; public exposure if firewall misconfigured | Security | Medium | High | Firewall default-deny, compliance test asserting no 9092/9093 public rule, smoke test from outside | terraform-specialist |
 | Changing controller count after bootstrap breaks static KRaft quorum | Operational | Medium | High | Validation + README warning; `lifecycle` docs; Iteration 3 runbook | kafka-config-reviewer |
 | Volume reformatted on server replace → data loss | Operational | Low | High | cloud-init formats only when no filesystem (`blkid` check); `delete_protection` on volumes | terraform-specialist |
-| `user_data` change forces server replacement | Operational | Medium | High | `lifecycle { ignore_changes = [user_data, image] }` | terraform-specialist |
-| Spread placement group limit (10 servers) | Technical | Low | Medium | One group per pool; validation `broker_count <= 10` | terraform-specialist |
+| `user_data` change forces server replacement | Operational | Medium | High | `lifecycle { ignore_changes = [user_data, image, ssh_keys] }` | terraform-specialist |
+| Spread placement group limit (10 servers) | Technical | Low | Medium | One group per pool; validation per placement group (brokers <= 10, controllers <= 5) | terraform-specialist |
 | PLAINTEXT Kafka in MVP | Security | High | Medium | Private network only; TLS/SASL in Iteration 2 | security-reviewer |
 | Ansible picks public IP as `ansible_default_ipv4` | Technical | High | High | Inventory sets `kafka_node_ip` to private IP explicitly | terraform-specialist |
 | ARM server types (`cax*`) untested with java/kafka roles | Technical | Low | Medium | Default `cpx`/`ccx` x86; document ARM as untested | qa-tester |

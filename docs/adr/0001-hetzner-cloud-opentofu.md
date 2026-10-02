@@ -1,9 +1,9 @@
 # ADR-0001: Hetzner Cloud with OpenTofu and the hcloud provider
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-02
 - **Owner:** Platform engineering
-- **Tickets:** pending
+- **Tickets:** #4, #5, #6
 
 ## Context
 Kafka clusters must run on low-cost European infrastructure. The bootstrap standard is OpenTofu (Terraform >= 1.5 compatible).

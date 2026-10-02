@@ -1,9 +1,9 @@
 # ADR-0002: Terraform renders inventory; Ansible runs separately
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-02
 - **Owner:** Platform engineering
-- **Tickets:** pending
+- **Tickets:** #4, #10, #11
 
 ## Context
 Infrastructure is provisioned by OpenTofu; Kafka is configured by the `axonops.axonops` collection. The handoff must be repeatable and keep secrets out of Terraform state.

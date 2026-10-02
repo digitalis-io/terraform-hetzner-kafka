@@ -1,9 +1,9 @@
 # ADR-0004: Kafka on private network only; public firewall allows SSH only
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-02
 - **Owner:** Platform engineering
-- **Tickets:** pending
+- **Tickets:** #4, #7
 
 ## Context
 The kafka role binds listeners on all interfaces (`PLAINTEXT://:9092`, `CONTROLLER://:9093`). MVP Kafka is PLAINTEXT. Hetzner firewalls filter public interfaces only.
@@ -20,3 +20,5 @@ Create `hcloud_network` + subnet; every node gets a deterministic private IP. Ka
 
 ## Consequences
 Clients must be inside the Hetzner network. Compliance test asserts no public rule for 9092/9093.
+
+The role opens 9092/9093 in ufw/firewalld only if one is active (`kafka_configure_firewall`). Hetzner Ubuntu images have neither active, so the Hetzner firewall is the only public control. Private IPs avoid the subnet gateway: assign with `cidrhost(subnet_cidr, 10 + index)`.
