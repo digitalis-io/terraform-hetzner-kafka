@@ -1,34 +1,116 @@
 name: CI
+
 on:
   push:
     branches: [main]
     paths:
       - '**/*.tf'
       - '**/*.tfvars'
+      - '**/*.tfvars.example'
+      - '**/*.hcl.example'
       - 'Makefile'
       - '.tflint.hcl'
       - '.pre-commit-config.yaml'
       - '.github/workflows/**'
+      - 'tests/**'
+      - 'ansible/**'
   pull_request:
     paths:
       - '**/*.tf'
       - '**/*.tfvars'
+      - '**/*.tfvars.example'
+      - '**/*.hcl.example'
       - 'Makefile'
       - '.tflint.hcl'
       - '.pre-commit-config.yaml'
       - '.github/workflows/**'
+      - 'tests/**'
+      - 'ansible/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Also serialises runs touching state if Object Storage locking proves
+# unreliable (see params/*/*/backend.hcl.example).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TOFU_VERSION: "1.11.2"
+  TFLINT_VERSION: "v0.64.0"
+  TRIVY_VERSION: "v0.75.0"
+  TF_DIR: examples/complete
+  FEATURES_DIR: tests/compliance/features
+
 jobs:
   validate:
+    name: fmt / validate / tflint / trivy
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: opentofu/setup-opentofu@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          tofu_version: latest
-      - run: tofu init -backend=false
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      - run: tofu fmt -check -recursive
+      - run: tofu init -backend=false -input=false
       - run: tofu validate
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - run: pip install pre-commit
-      - run: pre-commit run --all-files
+      - run: pip install pre-commit==4.6.2
+      - name: pre-commit (tflint, trivy, terraform-docs, hygiene)
+        env:
+          PCT_TFPATH: tofu
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  compliance:
+    name: terraform-compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check prerequisites
+        id: pre
+        run: |
+          if [ ! -d "$TF_DIR" ]; then
+            echo "::notice title=terraform-compliance skipped::$TF_DIR does not exist yet"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif ! find "$FEATURES_DIR" -name '*.feature' 2>/dev/null | grep -q .; then
+            echo "::notice title=terraform-compliance skipped::no .feature files in $FEATURES_DIR"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.pre.outputs.run == 'true'
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      - if: steps.pre.outputs.run == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - if: steps.pre.outputs.run == 'true'
+        run: pip install terraform-compliance==1.15.1
+      - name: Plan (-refresh=false, local backend) and run terraform-compliance
+        if: steps.pre.outputs.run == 'true'
+        env:
+          # Dummy token: plan never refreshes or applies. Not a secret.
+          HCLOUD_TOKEN: ci-dummy-token-0000000000000000000000000000000000000000000000000
+          ENVIRONMENT: dev
+          LOCATION: fsn1
+        run: make test VARS=params/fsn1/dev/params.tfvars.example
