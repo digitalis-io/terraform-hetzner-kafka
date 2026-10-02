@@ -78,7 +78,7 @@ jobs:
       - name: tofu validate (examples/complete)
         working-directory: ${{ env.TF_DIR }}
         run: |
-          tofu init -backend=false -input=false -lockfile=readonly
+          tofu init -backend=false -input=false
           tofu validate
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
