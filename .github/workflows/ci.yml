@@ -43,6 +43,7 @@ env:
   TRIVY_VERSION: "v0.75.0"
   TF_DIR: examples/complete
   FEATURES_DIR: tests/compliance/features
+  MODULE_DIR: modules/kafka-cluster
 
 jobs:
   validate:
@@ -75,6 +76,25 @@ jobs:
           PCT_TFPATH: tofu
         run: pre-commit run --all-files --show-diff-on-failure
 
+  module-test:
+    name: tofu test (modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+      # Plan-only suites with mock_provider "hcloud": no token, no resources.
+      - name: tofu test
+        working-directory: ${{ env.MODULE_DIR }}
+        run: |
+          tofu init -backend=false -input=false
+          tofu test
+
   compliance:
     name: terraform-compliance
     runs-on: ubuntu-latest
@@ -89,8 +109,9 @@ jobs:
           if [ ! -d "$TF_DIR" ]; then
             echo "::notice title=terraform-compliance skipped::$TF_DIR does not exist yet"
             echo "run=false" >> "$GITHUB_OUTPUT"
-          elif ! find "$FEATURES_DIR" -name '*.feature' 2>/dev/null | grep -q .; then
-            echo "::notice title=terraform-compliance skipped::no .feature files in $FEATURES_DIR"
+          elif ! find "$FEATURES_DIR" -name '*.feature' -exec grep -L '@tofu-test' {} + 2>/dev/null | grep -q .; then
+            # @tofu-test features are executed by the module-test job.
+            echo "::notice title=terraform-compliance skipped::no non-@tofu-test .feature files in $FEATURES_DIR"
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
