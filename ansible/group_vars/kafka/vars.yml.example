@@ -1,0 +1,100 @@
+---
+# Copy to ansible/group_vars/kafka/vars.yml and adjust. Secrets go in
+# vault.yml next to this file (see vault.yml.example), never here. Values here override the
+# axonops.axonops.kafka role defaults for this cluster; anything not set
+# falls back to the role's own default (see
+# ~/.ansible/collections/ansible_collections/axonops/axonops/roles/kafka/defaults/main.yml
+# or https://github.com/axonops/axonops-ansible-collection/blob/main/roles/kafka/README.md).
+#
+# Replication factors (kafka_replication_factor,
+# kafka_offsets_topic_replication_factor,
+# kafka_transaction_state_log_replication_factor,
+# kafka_transaction_state_log_min_isr) are computed from broker count in
+# site.yml and must NOT be overridden here — see site.yml vars block.
+# site.yml also sets default.replication.factor, min.insync.replicas and
+# auto.create.topics.enable=false. Add or override broker settings with
+# kafka_extra_config (do not set kafka_additional_config directly):
+# kafka_extra_config:
+#   log.retention.hours: 72
+#   auto.create.topics.enable: "true"
+
+# --- Version & sizing --------------------------------------------------------
+
+kafka_version: "4.0.0"
+# Roughly half the server RAM, max ~6G. 4G assumes >= 8 GB (e.g. cpx31,
+# ccx13); use 1G-2G on cpx11/cpx21.
+kafka_heap_size: 4G
+
+# --- Data dirs ---------------------------------------------------------------
+
+# Matches the mountpoint of the optional Hetzner data volume
+# (modules/kafka-cluster, docs/adr/0005-optional-volume-storage.md).
+# The volume itself mounts at /var/lib/kafka; Kafka's own partition data
+# lives one level below it.
+kafka_data_dirs:
+  - /var/lib/kafka/data
+
+# --- Service control ----------------------------------------------------------
+
+# Leave both false until the cluster has been validated once (role default
+# behaviour: format storage, do not start). Flip to true for the real
+# configure run.
+# kafka_start_on_install: true
+# kafka_start_on_boot: true
+
+# --- AxonOps agent (Iteration 2 / #15 — disabled here) -----------------------
+#
+# Uncomment and wire through Ansible Vault when #15 lands. Never put real
+# values in this .example file or in plaintext group_vars.
+# kafka_axonops_agent_enabled: true
+# kafka_axonops_org: "{{ vault_kafka_axonops_org }}"
+# kafka_axonops_cluster_name: "{{ kafka_axonops_cluster_name }}"   # set by inventory.yml (ADR-0002)
+# kafka_axonops_key: "{{ vault_kafka_axonops_key }}"               # SaaS API key, ansible-vault encrypted
+# kafka_axonops_server_host: "agents.axonops.cloud"
+
+# --- Security: TLS + SASL/SCRAM + ACLs (#14, ADR-0008) ---------------------
+#
+# Listeners become SASL_SSL on 9092 (clients, inter-broker) and 9093
+# (controllers). Enable only on a FRESH cluster: SCRAM credentials are
+# written when storage is formatted, so switching a running PLAINTEXT
+# cluster is a manual migration.
+#
+# Before `make configure`:
+#   1. make certs                       -> ansible/tls/ (CA + per-host certs)
+#   2. cp vault.yml.example vault.yml   -> set real passwords
+#   3. ansible-vault encrypt group_vars/kafka/vault.yml
+#
+# To run PLAINTEXT instead (not recommended), set
+# kafka_security_enabled: false and delete vault.yml.
+kafka_security_enabled: true
+
+kafka_tls_enabled: true
+# custom: PEM files made by `make certs` (ADR-0008). generate is dev only
+# (CA kept in /tmp on the control node); pki_agent needs the AxonOps PKI agent.
+kafka_tls_mode: custom
+kafka_tls_cert: "{{ playbook_dir }}/tls/{{ inventory_hostname }}.crt"
+kafka_tls_key: "{{ playbook_dir }}/tls/{{ inventory_hostname }}.key"
+kafka_tls_ca: "{{ playbook_dir }}/tls/ca.crt"
+# SASL authenticates clients; TLS only encrypts. Set `required` for mTLS.
+kafka_tls_client_auth: none
+
+kafka_sasl_enabled: true
+kafka_sasl_mechanism: SCRAM-SHA-512
+kafka_sasl_inter_broker_user: kafka-admin
+kafka_sasl_inter_broker_password: "{{ vault_kafka_sasl_inter_broker_password }}"
+# Application users (SCRAM) and kafka_acls below are applied only when the
+# role starts Kafka (kafka_start_on_install: true, see Service control).
+kafka_sasl_users: "{{ vault_kafka_sasl_users | default([]) }}"
+
+kafka_acl_enabled: true
+# Deny by default: a user with no matching ACL gets nothing.
+kafka_acl_allow_everyone_if_no_acl: false
+# The role re-applies every rule on each run and reports it as changed.
+# Rules removed from this list are NOT removed from the cluster.
+# Example: app1 may produce and consume topics prefixed "app1." and use
+# consumer groups prefixed "app1.".
+kafka_acls:
+  - {principal: "User:app1", operation: Write, resource_type: Topic, resource_name: "app1.", pattern_type: PREFIXED}
+  - {principal: "User:app1", operation: Read, resource_type: Topic, resource_name: "app1.", pattern_type: PREFIXED}
+  - {principal: "User:app1", operation: Describe, resource_type: Topic, resource_name: "app1.", pattern_type: PREFIXED}
+  - {principal: "User:app1", operation: Read, resource_type: Group, resource_name: "app1.", pattern_type: PREFIXED}

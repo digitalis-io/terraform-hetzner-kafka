@@ -8,6 +8,11 @@
 # Idempotent: the topic name includes a per-run UUID, so re-runs never
 # collide with a topic left behind by a previous run. Cleanup (topic
 # delete) is in `always`, so it runs even if produce/consume/assert fails.
+#
+# Security (#14, ADR-0008): when kafka_security_enabled is true, every
+# client call authenticates with the role's admin.properties (SASL_SSL as
+# the inter-broker super user). Extra checks prove that a client without
+# credentials is refused and that ACLs deny an application user by default.
 - name: Smoke-test the Kafka cluster (produce, consume, verify)
   # Ansible's native "group[0]" slice syntax (not Jinja): resolved from the
   # inventory at parse time, so --syntax-check / ansible-lint work without
@@ -30,6 +35,28 @@
         | join(',')
       }}
     ansible_remote_tmp: /tmp/.ansible_kafka
+    kafka_smoke_secure: "{{ kafka_security_enabled | default(false) | bool }}"
+    kafka_smoke_sasl: "{{ kafka_smoke_secure | bool and kafka_sasl_enabled | default(false) | bool }}"
+    kafka_smoke_tls: "{{ kafka_smoke_secure | bool and kafka_tls_enabled | default(false) | bool }}"
+    # Written by the kafka role when security is on; owned by kafka, 0600.
+    kafka_smoke_admin_props: "{{ kafka_install_root | default('/opt') }}/kafka/config/admin.properties"
+    kafka_smoke_admin_args: "{{ ('--command-config ' ~ kafka_smoke_admin_props) if kafka_smoke_secure | bool else '' }}"
+    kafka_smoke_login_module: >-
+      {{ 'org.apache.kafka.common.security.scram.ScramLoginModule'
+         if (kafka_sasl_mechanism | default('SCRAM-SHA-512')).startswith('SCRAM')
+         else 'org.apache.kafka.common.security.plain.PlainLoginModule' }}
+    # Same TLS trust as the role's admin.properties, no credentials.
+    kafka_smoke_client_base: |
+      security.protocol={{ 'SASL_SSL' if kafka_smoke_tls | bool else 'SASL_PLAINTEXT' }}
+      {% if kafka_smoke_tls | bool %}
+      ssl.truststore.type=PEM
+      ssl.truststore.location={{ kafka_tls_remote_dir | default('/etc/kafka/tls') }}/ca.pem
+      ssl.endpoint.identification.algorithm=
+      {% endif %}
+      default.api.timeout.ms=15000
+      request.timeout.ms=10000
+    # ACL deny check needs ACLs on and at least one application user.
+    kafka_smoke_acl_check: "{{ kafka_smoke_sasl | bool and kafka_acl_enabled | default(false) | bool and (kafka_sasl_users | default([]) | length > 0) }}"
 
   tasks:
     # set_fact, not play vars: play vars are evaluated lazily on every
@@ -54,6 +81,7 @@
               {{ kafka_smoke_bin_dir }}/kafka-topics.sh
               --create
               --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              {{ kafka_smoke_admin_args }}
               --topic {{ kafka_smoke_topic }}
               --partitions 1
               --replication-factor {{ kafka_smoke_replication_factor }}
@@ -68,6 +96,7 @@
               echo "{{ kafka_smoke_message }}" |
               {{ kafka_smoke_bin_dir }}/kafka-console-producer.sh
               --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              {{ ('--producer.config ' ~ kafka_smoke_admin_props) if kafka_smoke_secure | bool else '' }}
               --topic {{ kafka_smoke_topic }}
               --sync
               --producer-property acks=all
@@ -81,6 +110,7 @@
               timeout 30
               {{ kafka_smoke_bin_dir }}/kafka-console-consumer.sh
               --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              {{ ('--consumer.config ' ~ kafka_smoke_admin_props) if kafka_smoke_secure | bool else '' }}
               --topic {{ kafka_smoke_topic }}
               --from-beginning
               --max-messages 1
@@ -96,13 +126,131 @@
               Smoke test failed: expected to consume "{{ kafka_smoke_message }}"
               but got: {{ kafka__reg_smoke_consumed.stdout_lines }}
             success_msg: "Smoke test passed: produced message was consumed back unchanged."
+
+        # #14 "Unauthenticated client rejected". Two client configs that
+        # differ ONLY in the SASL credentials: the one with credentials must
+        # work and the one without must fail. This rules out a broken
+        # truststore or a down broker passing as "refused".
+        - name: Check authentication and ACL enforcement
+          when: kafka_smoke_sasl | bool
+          block:
+            - name: Create a private directory for temporary client configs
+              ansible.builtin.tempfile:
+                state: directory
+                suffix: .kafka-smoke
+              register: kafka__reg_smoke_tmpdir
+
+            - name: Write a client config without SASL credentials
+              ansible.builtin.copy:
+                dest: "{{ kafka__reg_smoke_tmpdir.path }}/noauth.properties"
+                mode: "0600"
+                content: "{{ kafka_smoke_client_base }}"
+
+            - name: Write the same client config with the inter-broker credentials
+              ansible.builtin.copy:
+                dest: "{{ kafka__reg_smoke_tmpdir.path }}/auth.properties"
+                mode: "0600"
+                content: |
+                  {{ kafka_smoke_client_base }}
+                  sasl.mechanism={{ kafka_sasl_mechanism | default('SCRAM-SHA-512') }}
+                  sasl.jaas.config={{ kafka_smoke_login_module }} required username="{{ kafka_sasl_inter_broker_user | default('kafka-admin') }}" password="{{ kafka_sasl_inter_broker_password }}";
+              no_log: true
+
+            - name: List topics with credentials (control)
+              ansible.builtin.command:
+                cmd: >-
+                  timeout 60
+                  {{ kafka_smoke_bin_dir }}/kafka-topics.sh
+                  --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+                  --command-config {{ kafka__reg_smoke_tmpdir.path }}/auth.properties
+                  --list
+              register: kafka__reg_auth_list
+              changed_when: false
+              failed_when: kafka_smoke_topic not in kafka__reg_auth_list.stdout_lines
+
+            - name: List topics without credentials
+              ansible.builtin.command:
+                cmd: >-
+                  timeout 60
+                  {{ kafka_smoke_bin_dir }}/kafka-topics.sh
+                  --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+                  --command-config {{ kafka__reg_smoke_tmpdir.path }}/noauth.properties
+                  --list
+              register: kafka__reg_noauth_list
+              changed_when: false
+              failed_when: false
+
+            - name: Assert the client without credentials was refused
+              ansible.builtin.assert:
+                that:
+                  - kafka__reg_noauth_list.rc != 0
+                  # 124 = killed by `timeout`: inconclusive, not a refusal.
+                  - kafka__reg_noauth_list.rc != 124
+                  - kafka_smoke_topic not in kafka__reg_noauth_list.stdout_lines
+                fail_msg: >-
+                  A client without SASL credentials was not cleanly refused
+                  (rc {{ kafka__reg_noauth_list.rc }}). The same config with
+                  credentials worked, so the listeners are not enforcing
+                  authentication: {{ kafka__reg_noauth_list.stdout_lines }}
+                success_msg: "Unauthenticated client refused (rc {{ kafka__reg_noauth_list.rc }}); authenticated control worked."
+
+            # Deny by default: the first application user has no ACL on the
+            # smoke-test topic (unless an operator granted it Write on "*").
+            - name: Write a client config for the first application user
+              ansible.builtin.copy:
+                dest: "{{ kafka__reg_smoke_tmpdir.path }}/app.properties"
+                mode: "0600"
+                content: |
+                  {{ kafka_smoke_client_base }}
+                  sasl.mechanism={{ kafka_sasl_mechanism | default('SCRAM-SHA-512') }}
+                  sasl.jaas.config={{ kafka_smoke_login_module }} required username="{{ kafka_sasl_users[0].name }}" password="{{ kafka_sasl_users[0].password }}";
+              no_log: true
+              when: kafka_smoke_acl_check | bool
+
+            - name: Produce to the smoke-test topic as an application user without an ACL
+              ansible.builtin.shell:
+                cmd: >-
+                  set -o pipefail &&
+                  echo denied |
+                  timeout 60
+                  {{ kafka_smoke_bin_dir }}/kafka-console-producer.sh
+                  --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+                  --producer.config {{ kafka__reg_smoke_tmpdir.path }}/app.properties
+                  --topic {{ kafka_smoke_topic }}
+                  --sync
+                  --producer-property max.block.ms=15000
+                executable: /bin/bash
+              register: kafka__reg_acl_produce
+              changed_when: false
+              failed_when: false
+              when: kafka_smoke_acl_check | bool
+
+            - name: Assert the application user was denied by the authorizer
+              ansible.builtin.assert:
+                that:
+                  - kafka__reg_acl_produce.rc != 0
+                  - (kafka__reg_acl_produce.stdout ~ kafka__reg_acl_produce.stderr) is search('(?i)authoriz')
+                fail_msg: >-
+                  {{ kafka_sasl_users[0].name }} could write to {{ kafka_smoke_topic }}
+                  without an ACL, or failed for a reason other than
+                  authorization (rc {{ kafka__reg_acl_produce.rc }}):
+                  {{ kafka__reg_acl_produce.stderr_lines | default([]) | select('search', '(?i)exception') | list }}
+                success_msg: "ACLs deny by default: {{ kafka_sasl_users[0].name }} was not authorized."
+              when: kafka_smoke_acl_check | bool
       always:
+        - name: Remove the temporary client configs
+          ansible.builtin.file:
+            path: "{{ kafka__reg_smoke_tmpdir.path }}"
+            state: absent
+          when: kafka__reg_smoke_tmpdir.path is defined
+
         - name: Delete the smoke-test topic
           ansible.builtin.command:
             cmd: >-
               {{ kafka_smoke_bin_dir }}/kafka-topics.sh
               --delete
               --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              {{ kafka_smoke_admin_args }}
               --topic {{ kafka_smoke_topic }}
           changed_when: true
           # The topic may never have been created if the create step itself

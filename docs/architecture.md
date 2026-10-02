@@ -25,7 +25,7 @@
 
 ### Out of scope (MVP)
 
-- TLS / SASL / ACLs (role supports them; enabled in Iteration 2).
+- TLS / SASL / ACLs (role supports them; enabled in the example from #14, ADR-0008).
 - Public client access to Kafka.
 - Multi-location clusters and rack awareness.
 - Bastion / private-only servers (no public IP).
@@ -97,7 +97,7 @@ flowchart LR
 
 - Hetzner API token via `HCLOUD_TOKEN` environment variable only.
 - SSH key-based root access for Ansible; no root password set when SSH keys are supplied; sshd hardening is out of scope for MVP.
-- Kafka: PLAINTEXT on the private network in MVP. TLS + SASL/SCRAM in Iteration 2. Secrets (SASL passwords, AxonOps key) live in Ansible Vault, never in Terraform state.
+- Kafka: PLAINTEXT on the private network in MVP. From #14 the example enables SASL_SSL (TLS + SCRAM-SHA-512) and StandardAuthorizer ACLs (ADR-0008). Secrets (SASL passwords, AxonOps key) live in Ansible Vault, never in Terraform state.
 
 ### Observability
 
@@ -122,6 +122,7 @@ Local state by default; a remote S3-compatible backend (e.g. Hetzner Object Stor
 | [0005](adr/0005-optional-volume-storage.md) | Optional Hetzner volume per broker, mounted by cloud-init |
 | [0007](adr/0007-local-state-default-s3-recommended.md) | Local state by default; S3 remote state recommended (supersedes 0006) |
 | [0006](adr/0006-state-backend-hetzner-object-storage.md) | Superseded by 0007. Remote state on Hetzner Object Storage (S3 backend) |
+| [0008](adr/0008-kafka-tls-certificate-source.md) | TLS from a project CA (`make certs`, custom mode); SASL/SCRAM-SHA-512 and ACLs; secrets in Ansible Vault |
 
 ## 5. Risks
 
@@ -132,7 +133,7 @@ Local state by default; a remote S3-compatible backend (e.g. Hetzner Object Stor
 | Volume reformatted on server replace → data loss | Operational | Low | High | cloud-init formats only when no filesystem (`blkid` check); `delete_protection` on volumes | terraform-specialist |
 | `user_data` change forces server replacement | Operational | Medium | High | `lifecycle { ignore_changes = [user_data, image, ssh_keys] }` | terraform-specialist |
 | Spread placement group limit (10 servers) | Technical | Low | Medium | One group per pool; validation per placement group (brokers <= 10, controllers <= 5) | terraform-specialist |
-| PLAINTEXT Kafka in MVP | Security | High | Medium | Private network only; TLS/SASL in Iteration 2 | security-reviewer |
+| PLAINTEXT Kafka in MVP | Security | High | Medium | Private network only; SASL_SSL + ACLs in the example from #14 (ADR-0008) | security-reviewer |
 | Ansible picks public IP as `ansible_default_ipv4` | Technical | High | High | Inventory sets `kafka_node_ip` to private IP explicitly | terraform-specialist |
 | ARM server types (`cax*`) untested with java/kafka roles | Technical | Low | Medium | Default `cpx`/`ccx` x86; document ARM as untested | qa-tester |
 

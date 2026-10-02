@@ -1,0 +1,20 @@
+---
+# Secrets for group_vars/kafka/vars.yml (#14, ADR-0008).
+#
+#   cp vault.yml.example vault.yml
+#   # replace every CHANGE_ME value (e.g. openssl rand -hex 24)
+#   ansible-vault encrypt vault.yml
+#
+# vault.yml is gitignored. Run make configure / make smoke-test with
+# ANSIBLE_VAULT_PASSWORD_FILE set, or the Makefile asks for the password.
+# site.yml refuses to run while any password is missing, shorter than 16
+# characters, still CHANGE_ME, or uses characters other than letters,
+# digits and . _ ~ - (the role embeds passwords in Kafka CLI arguments).
+
+# Inter-broker and controller identity; also the cluster super user.
+vault_kafka_sasl_inter_broker_password: CHANGE_ME
+
+# Application SCRAM users. Grant access with kafka_acls in vars.yml.
+vault_kafka_sasl_users:
+  - name: app1
+    password: CHANGE_ME

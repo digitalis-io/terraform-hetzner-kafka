@@ -1,0 +1,117 @@
+---
+# Realises the "Missing SASL password" and "Missing TLS files" scenarios in
+# tests/features/secure-cluster.feature without Docker or a real host: runs
+# the same assertions as site.yml's security pre_tasks against localhost.
+# Each scenario must FAIL inside the block; the rescue confirms the
+# expected assertion is what failed (same pattern as
+# assert-inventory-contract.yml).
+#
+# Run: ansible-playbook -i localhost, ansible/tests/assert-security-prereqs.yml
+- name: "Scenario: SASL enabled without a password fails before any host changes"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kafka_security_enabled: true
+    kafka_sasl_enabled: true
+    # Same indirection as group_vars/kafka/vars.yml.example; the vault
+    # variable is deliberately undefined (no vault.yml loaded).
+    kafka_sasl_inter_broker_password: "{{ vault_kafka_sasl_inter_broker_password }}"
+    kafka_sasl_users: []
+  tasks:
+    - name: Run the same assertion as site.yml
+      block:
+        - name: Assert SASL passwords are set when SASL is enabled (copy of site.yml logic)
+          ansible.builtin.assert:
+            that:
+              - kafka_sasl_inter_broker_password | default('') | string | length >= 16
+              - kafka_sasl_inter_broker_password | default('') != 'CHANGE_ME'
+            fail_msg: "SASL is enabled but kafka_sasl_inter_broker_password is missing."
+        - name: Fail the test file, the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the SASL password assertion to fail without a password, but it passed."
+      rescue:
+        - name: Confirm the SASL password assertion is what failed
+          ansible.builtin.assert:
+            that: "'kafka_sasl_inter_broker_password is missing' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Play failed for a reason other than the expected SASL password assertion."
+            success_msg: "PASS: missing SASL password fails before any host changes."
+
+- name: "Scenario: SASL password left as CHANGE_ME fails before any host changes"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kafka_sasl_users:
+      - name: app1
+        password: CHANGE_ME
+  tasks:
+    - name: Run the same assertion as site.yml
+      block:
+        - name: Assert application user passwords are set (copy of site.yml logic)
+          ansible.builtin.assert:
+            that:
+              - kafka_sasl_users | map(attribute='password') | map('string') | select('match', '^.{0,15}$') | list | length == 0
+              - "'CHANGE_ME' not in (kafka_sasl_users | map(attribute='password') | list)"
+            fail_msg: "A kafka_sasl_users password is still CHANGE_ME."
+        - name: Fail the test file, the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the placeholder password to be rejected, but it passed."
+      rescue:
+        - name: Confirm the placeholder check is what failed
+          ansible.builtin.assert:
+            that: "'CHANGE_ME' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Play failed for a reason other than the expected placeholder check."
+            success_msg: "PASS: placeholder SASL password is rejected."
+
+- name: "Scenario: SASL password with characters Kafka CLI arguments cannot carry fails"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kafka_sasl_inter_broker_password: "abcdefghijklmnop,q]"
+  tasks:
+    - name: Run the same assertion as site.yml
+      block:
+        - name: Assert the password charset (copy of site.yml logic)
+          ansible.builtin.assert:
+            that:
+              - kafka_sasl_inter_broker_password | string is match('^[A-Za-z0-9._~-]+$')
+            fail_msg: "Password uses characters outside A-Z a-z 0-9 . _ ~ -"
+        - name: Fail the test file, the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected a password containing ',' and ']' to be rejected, but it passed."
+      rescue:
+        - name: Confirm the charset check is what failed
+          ansible.builtin.assert:
+            that: "'characters outside' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Play failed for a reason other than the expected charset check."
+            success_msg: "PASS: password with unsafe characters is rejected."
+
+- name: "Scenario: TLS custom mode without certificates fails before any host changes"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kafka_tls_cert: "{{ playbook_dir }}/does-not-exist/kafka-dev-broker-1.crt"
+    kafka_tls_key: "{{ playbook_dir }}/does-not-exist/kafka-dev-broker-1.key"
+    kafka_tls_ca: "{{ playbook_dir }}/does-not-exist/ca.crt"
+  tasks:
+    - name: Run the same assertion as site.yml
+      block:
+        - name: Assert TLS files exist on the control node (copy of site.yml logic)
+          ansible.builtin.assert:
+            that:
+              - kafka_tls_cert is file
+              - kafka_tls_key is file
+              - kafka_tls_ca is file
+            fail_msg: "Run `make certs` to create them in ansible/tls/."
+        - name: Fail the test file, the assertion above should have failed
+          ansible.builtin.fail:
+            msg: "Expected the TLS file assertion to fail without certificates, but it passed."
+      rescue:
+        - name: Confirm the TLS file assertion is what failed
+          ansible.builtin.assert:
+            that: "'make certs' in (ansible_failed_result.msg | default(''))"
+            fail_msg: "Play failed for a reason other than the expected TLS file assertion."
+            success_msg: "PASS: missing TLS files fail before any host changes."
