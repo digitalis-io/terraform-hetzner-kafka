@@ -1,0 +1,86 @@
+---
+# NOTE: not run locally in this change (no molecule install in this
+# environment) — syntax-checked and lint-checked only. Runs in CI.
+#
+# 3 combined nodes (broker + controller on every host), per the issue's
+# acceptance criteria. ubuntu2404 only here — this scenario validates
+# site.yml/smoke-test.yml behaviour, not OS portability (the kafka role's
+# own molecule suite already covers the distro matrix).
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../requirements.yml
+driver:
+  name: docker
+platforms:
+  - name: kafka-combined-1
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+  - name: kafka-combined-2
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+  - name: kafka-combined-3
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+provisioner:
+  name: ansible
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    group_vars:
+      all:
+        kafka_start_on_install: true
+        kafka_start_on_boot: false
+        kafka_java_install: true
+        kafka_axonops_agent_enabled: false
+    host_vars:
+      # kafka_node_ip templates against the container's own facts (Ansible
+      # evaluates host_vars Jinja per host at inventory-parse time) since
+      # Docker containers' IPs aren't known until they're created.
+      kafka-combined-1:
+        kafka_node_id: 1
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+      kafka-combined-2:
+        kafka_node_id: 2
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+      kafka-combined-3:
+        kafka_node_id: 3
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - destroy
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

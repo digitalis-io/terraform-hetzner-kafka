@@ -1,0 +1,23 @@
+---
+# Collections required to run site.yml / smoke-test.yml.
+#
+# axonops.axonops IS published on Galaxy (verified: galaxy.ansible.com API,
+# highest published version 0.6.3 at time of writing) — install from there,
+# not from the GitHub source directly. Galaxy's resolver supports the
+# semver range below; a `type: git` source only accepts a single tag/branch/
+# commit, not a range, so galaxy is both simpler and matches the pin intent.
+# Range is the 0.6.x line: the role contract this playbook was written
+# against (kafka role defaults, task names, inventory keys as of 0.6.3).
+#
+# ansible.posix / community.general / community.crypto / community.docker /
+# kubernetes.core are axonops.axonops's own role dependencies (see
+# axonops/axonops-ansible-collection galaxy.yml). Pin ansible.posix and
+# community.general explicitly since the kafka/chrony/preflight roles call
+# modules from both directly; the rest resolve transitively.
+collections:
+  - name: axonops.axonops
+    version: ">=0.6.3,<0.7.0"
+  - name: ansible.posix
+    version: ">=1.5.0,<3.0.0"
+  - name: community.general
+    version: ">=8.0.0,<14.0.0"

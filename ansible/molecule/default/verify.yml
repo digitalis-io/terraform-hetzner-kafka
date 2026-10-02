@@ -1,0 +1,53 @@
+---
+# NOTE: not run locally in this change — no molecule/docker test run was
+# performed in this environment; syntax-checked only. Runs in CI.
+- name: "Scenario: Configure combined cluster — kafka.service active on all 3 hosts"
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check kafka.service is active
+      ansible.builtin.systemd:
+        name: kafka
+      register: kafka__reg_service
+      check_mode: false
+
+    - name: Then kafka.service is active on all 3 hosts
+      ansible.builtin.assert:
+        that:
+          - kafka__reg_service.status.ActiveState == 'active'
+        fail_msg: "kafka.service is not active on {{ inventory_hostname }}."
+
+- name: "Scenario: Configure combined cluster — KRaft quorum has 3 voters"
+  hosts: kafka_controllers[0]
+  gather_facts: false
+  vars:
+    kafka_smoke_bin_dir: "{{ kafka_install_root | default('/opt') }}/kafka/bin"
+  tasks:
+    - name: Read server.properties to count controller.quorum.voters entries
+      ansible.builtin.slurp:
+        src: "{{ kafka_smoke_bin_dir | dirname }}/config/server.properties"
+      register: kafka__reg_props
+
+    - name: And the KRaft quorum has 3 voters
+      vars:
+        kafka__voters_line: >-
+          {{ (kafka__reg_props.content | b64decode).splitlines()
+             | select('match', '^controller.quorum.voters=')
+             | first }}
+      ansible.builtin.assert:
+        that:
+          - kafka__voters_line.split('=')[1].split(',') | length == 3
+        fail_msg: "Expected 3 controller.quorum.voters entries, found: {{ kafka__voters_line }}"
+
+    - name: And new topics default to RF 3, min ISR 2 and no auto-creation
+      vars:
+        kafka__props_lines: "{{ (kafka__reg_props.content | b64decode).splitlines() }}"
+      ansible.builtin.assert:
+        that:
+          - "'default.replication.factor=3' in kafka__props_lines"
+          - "'min.insync.replicas=2' in kafka__props_lines"
+          - "'auto.create.topics.enable=false' in kafka__props_lines"
+        fail_msg: "server.properties is missing the durability defaults set by site.yml"
+
+- name: "Scenario: Smoke test — produced message is consumed back unchanged"
+  ansible.builtin.import_playbook: ../../smoke-test.yml

@@ -152,3 +152,48 @@ jobs:
           ENVIRONMENT: dev
           LOCATION: fsn1
         run: make test VARS=params/fsn1/dev/params.tfvars.example
+
+  ansible-lint:
+    name: ansible-lint / yamllint / syntax-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core==2.17.* ansible-lint==25.* yamllint==1.37.*
+      - run: ansible-galaxy collection install -r requirements.yml
+      - run: yamllint -c .yamllint .
+      - run: ansible-playbook -i tests/inventory.yml site.yml --syntax-check
+      - run: ansible-playbook -i tests/inventory.yml smoke-test.yml --syntax-check
+      - run: ANSIBLE_INVENTORY=tests/inventory.yml ansible-lint --profile production
+      - name: Inventory-contract edge-case assertions (localhost, no Docker needed)
+        run: ansible-playbook -i localhost, tests/assert-inventory-contract.yml
+
+  molecule:
+    name: molecule (3 combined nodes, converge + idempotence + smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: ansible-lint
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core==2.17.* "molecule==25.*" "molecule-plugins[docker]==23.*" docker
+      - run: ansible-galaxy collection install -r requirements.yml
+      - run: molecule test
+        env:
+          PY_COLORS: "1"
+          ANSIBLE_FORCE_COLOR: "1"

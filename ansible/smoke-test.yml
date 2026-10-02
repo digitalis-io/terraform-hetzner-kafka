@@ -1,0 +1,97 @@
+---
+# Produce/consume smoke test over the private network (ADR-0004: Kafka
+# never exposed publicly). Runs entirely on the first broker host, talking
+# to the cluster via private IPs (kafka_node_ip) of every host in
+# kafka_brokers — never via localhost:9092, so this also proves
+# inter-broker advertised listeners work, not just loopback.
+#
+# Idempotent: the topic name includes a per-run UUID, so re-runs never
+# collide with a topic left behind by a previous run. Cleanup (topic
+# delete) is in `always`, so it runs even if produce/consume/assert fails.
+- name: Smoke-test the Kafka cluster (produce, consume, verify)
+  # Ansible's native "group[0]" slice syntax (not Jinja): resolved from the
+  # inventory at parse time, so --syntax-check / ansible-lint work without
+  # loading a real inventory. kafka_brokers is a required group in the
+  # contract (ADR-0002) — no fallback to a plain "kafka" group needed.
+  hosts: kafka_brokers[0]
+  become: true
+  become_user: "{{ kafka_user | default('kafka') }}"
+  gather_facts: false
+  vars:
+    kafka_smoke_brokers: "{{ groups['kafka_brokers'] }}"
+    kafka_smoke_bin_dir: "{{ kafka_install_root | default('/opt') }}/kafka/bin"
+    # gather_facts is false (no need for this play), so build the unique
+    # suffix from a pipe lookup rather than ansible_date_time.
+    kafka_smoke_topic: "smoke-test-{{ lookup('pipe', 'date +%s%N') }}"
+    kafka_smoke_message: "smoke-test-message-{{ kafka_smoke_topic }}"
+    kafka_smoke_replication_factor: "{{ [kafka_smoke_brokers | length, 3] | min }}"
+    # Private IPs only (ADR-0004) — never ansible_host (public IP).
+    kafka_smoke_bootstrap_servers: >-
+      {{
+        kafka_smoke_brokers
+        | map('extract', hostvars, 'kafka_node_ip')
+        | map('regex_replace', '^(.*)$', '\1:9092')
+        | join(',')
+      }}
+    ansible_remote_tmp: /tmp/.ansible_kafka
+
+  tasks:
+    - name: Produce, consume and verify a message, always cleaning up the test topic
+      block:
+        - name: Create the smoke-test topic
+          ansible.builtin.command:
+            cmd: >-
+              {{ kafka_smoke_bin_dir }}/kafka-topics.sh
+              --create
+              --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              --topic {{ kafka_smoke_topic }}
+              --partitions 1
+              --replication-factor {{ kafka_smoke_replication_factor }}
+          changed_when: true
+
+        - name: Produce one message to the smoke-test topic
+          # shell (not command): kafka-console-producer.sh reads the message
+          # from stdin, so the `echo | ...` pipe is required.
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail &&
+              echo "{{ kafka_smoke_message }}" |
+              {{ kafka_smoke_bin_dir }}/kafka-console-producer.sh
+              --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              --topic {{ kafka_smoke_topic }}
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Consume one message from the smoke-test topic
+          ansible.builtin.command:
+            cmd: >-
+              timeout 30
+              {{ kafka_smoke_bin_dir }}/kafka-console-consumer.sh
+              --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              --topic {{ kafka_smoke_topic }}
+              --from-beginning
+              --max-messages 1
+              --timeout-ms 25000
+          register: kafka__reg_smoke_consumed
+          changed_when: false
+
+        - name: Assert the consumed message matches what was produced
+          ansible.builtin.assert:
+            that:
+              - kafka_smoke_message in kafka__reg_smoke_consumed.stdout_lines
+            fail_msg: >-
+              Smoke test failed: expected to consume "{{ kafka_smoke_message }}"
+              but got: {{ kafka__reg_smoke_consumed.stdout_lines }}
+            success_msg: "Smoke test passed: produced message was consumed back unchanged."
+      always:
+        - name: Delete the smoke-test topic
+          ansible.builtin.command:
+            cmd: >-
+              {{ kafka_smoke_bin_dir }}/kafka-topics.sh
+              --delete
+              --bootstrap-server {{ kafka_smoke_bootstrap_servers }}
+              --topic {{ kafka_smoke_topic }}
+          changed_when: true
+          # The topic may never have been created if the create step itself
+          # failed — deleting a non-existent topic must not fail cleanup.
+          failed_when: false

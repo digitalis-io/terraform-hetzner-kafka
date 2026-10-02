@@ -1,0 +1,11 @@
+---
+# NOTE: not run locally in this change — no molecule/docker test run was
+# performed in this environment; syntax-checked only. Runs in CI.
+#
+# Exercises the real site.yml unmodified (no "skip service start in Docker"
+# var needed — kafka_start_on_install/kafka_start_on_boot are already
+# false by default in the role; molecule.yml's group_vars flips
+# kafka_start_on_install to true so this scenario proves the service
+# actually comes up under Docker, same as the acceptance criteria require).
+- name: Converge
+  ansible.builtin.import_playbook: ../../site.yml
