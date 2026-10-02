@@ -1,0 +1,34 @@
+name: CI
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - 'Makefile'
+      - '.tflint.hcl'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - 'Makefile'
+      - '.tflint.hcl'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/**'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+      - run: tofu init -backend=false
+      - run: tofu validate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pre-commit
+      - run: pre-commit run --all-files
