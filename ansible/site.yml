@@ -1,0 +1,99 @@
+---
+# Configures the Hetzner-provisioned KRaft Kafka cluster (OpenTofu
+# modules/kafka-cluster, #10) with the axonops.axonops collection.
+#
+# Out of scope (Iteration 2, #15): TLS, SASL, ACLs, AxonOps agent.
+- name: Configure Kafka cluster
+  hosts: kafka
+  become: true
+  vars:
+    # Replication factors derive from BROKER host count, not play hosts:
+    # dedicated controllers (ADR-0003) store no partition data, so sizing
+    # against groups['kafka'] would overstate how many replicas can exist.
+    kafka_broker_count: "{{ groups['kafka_brokers'] | default([]) | length }}"
+    kafka_replication_factor: "{{ [kafka_broker_count | int, 3] | min }}"
+    kafka_offsets_topic_replication_factor: "{{ [kafka_broker_count | int, 3] | min }}"
+    kafka_transaction_state_log_replication_factor: "{{ [kafka_broker_count | int, 3] | min }}"
+    kafka_transaction_state_log_min_isr: "{{ [[kafka_broker_count | int - 1, 2] | min, 1] | max }}"
+    # The role's server.properties template does not render
+    # default.replication.factor or min.insync.replicas (kafka_replication_factor
+    # only feeds kafka_topics), so without these every auto-created or
+    # CLI-created topic would get RF=1. Set them here, disable topic
+    # auto-creation, and let users add their own broker settings through
+    # kafka_extra_config (merged on top, so it can override these).
+    kafka__site_durability_config:
+      default.replication.factor: "{{ kafka_replication_factor }}"
+      min.insync.replicas: "{{ kafka_transaction_state_log_min_isr }}"
+      auto.create.topics.enable: "false"
+    kafka_additional_config: "{{ kafka__site_durability_config | combine(kafka_extra_config | default({})) }}"
+    kafka_data_dirs:
+      - /var/lib/kafka/data
+    # Iteration 1 (#11) leaves the AxonOps agent disabled; wired up in
+    # Iteration 2 (#15) once key handling/vault wiring lands.
+    kafka_axonops_agent_enabled: false
+
+  pre_tasks:
+    - name: Assert every Kafka host declares kafka_node_id, kafka_node_roles and kafka_node_ip
+      ansible.builtin.assert:
+        that:
+          - hostvars[inventory_hostname].kafka_node_id is defined
+          - hostvars[inventory_hostname].kafka_node_roles is defined
+          - hostvars[inventory_hostname].kafka_node_roles | length > 0
+          - hostvars[inventory_hostname].kafka_node_ip is defined
+        fail_msg: >-
+          Host {{ inventory_hostname }} is missing kafka_node_id, kafka_node_roles
+          or kafka_node_ip. This inventory must come from the OpenTofu module
+          output (modules/kafka-cluster, ADR-0002) — it sets all three per
+          host. The kafka role itself only fails at package-install time, by
+          which point packages are already on disk; this assertion fails the
+          play before any installation happens.
+      tags: always
+
+    # #9 (volumes): cloud-init mounts the broker data volume at
+    # /var/lib/kafka with `nofail`, so a slow Hetzner volume attachment
+    # mounts silently absent rather than failing cloud-init. An /etc/fstab
+    # entry with no live mount means Kafka would format and write its log
+    # dirs onto the root filesystem instead — fail loudly before that
+    # happens. Only applies where a volume was actually provisioned
+    # (volume_size_gb > 0 in the module); hosts with no fstab entry for the
+    # mountpoint are the no-volume case and are not asserted here.
+    - name: Check for an /etc/fstab entry for the Kafka data mountpoint
+      ansible.builtin.command:
+        cmd: findmnt --fstab --noheadings --mountpoint /var/lib/kafka
+      register: kafka__reg_fstab_entry
+      changed_when: false
+      # rc 1 = no fstab entry (no-volume case). Anything else (e.g. 127,
+      # findmnt missing) fails rather than silently skipping the check.
+      failed_when: kafka__reg_fstab_entry.rc not in [0, 1]
+      check_mode: false
+
+    - name: Assert the Kafka data volume is actually mounted when fstab expects it
+      ansible.builtin.command:
+        cmd: findmnt --mountpoint /var/lib/kafka
+      register: kafka__reg_live_mount
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: kafka__reg_fstab_entry.rc == 0
+
+    - name: Fail if /var/lib/kafka is in fstab but not actually mounted
+      ansible.builtin.fail:
+        msg: >-
+          /var/lib/kafka has an /etc/fstab entry on {{ inventory_hostname }}
+          but is not currently mounted (findmnt found nothing at the live
+          mountpoint). The Hetzner data volume attachment likely did not
+          complete before cloud-init's `nofail` mount attempt. Refusing to
+          continue — Kafka would otherwise format and write its log
+          directories onto the root filesystem.
+      when:
+        - kafka__reg_fstab_entry.rc == 0
+        - kafka__reg_live_mount.rc != 0
+      tags: always
+
+  roles:
+    - role: axonops.axonops.chrony
+      tags: [ntp, chrony]
+    - role: axonops.axonops.preflight
+      tags: preflight
+    - role: axonops.axonops.kafka
+      tags: kafka
