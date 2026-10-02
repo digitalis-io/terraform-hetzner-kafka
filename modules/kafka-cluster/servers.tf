@@ -9,13 +9,6 @@ resource "hcloud_placement_group" "this" {
   labels = merge(local.base_labels, { role = each.key })
 }
 
-locals {
-  # Per-node cloud-init. null for every node until #9 renders the volume-mount
-  # user_data for nodes with has_volume = true. Changes are ignored after
-  # creation (lifecycle below), so filling this in never replaces a server.
-  user_data = { for k in keys(local.nodes) : k => null }
-}
-
 # One server per local.nodes entry, keyed broker-<n> / controller-<n>, so
 # resizing a pool only adds or removes tail servers (ADR-0003).
 resource "hcloud_server" "this" {
@@ -28,7 +21,7 @@ resource "hcloud_server" "this" {
   ssh_keys           = local.ssh_keys
   firewall_ids       = [hcloud_firewall.this.id]
   placement_group_id = hcloud_placement_group.this[each.value.role].id
-  user_data          = local.user_data[each.key]
+  user_data          = local.user_data[each.key] # volumes.tf: null unless the node has a volume
   labels             = each.value.labels
 
   # Public IPv4 is required for Ansible SSH and package/agent egress; IPv6 is

@@ -43,7 +43,7 @@ output "firewall_id" {
 }
 
 output "servers" {
-  description = "Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public_ipv4, public_ipv6, private_ip."
+  description = "Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public_ipv4, public_ipv6, private_ip, volume_id (null when the node has no data volume)."
   value = {
     for k, s in hcloud_server.this : k => {
       id          = s.id
@@ -51,6 +51,7 @@ output "servers" {
       public_ipv4 = s.ipv4_address
       public_ipv6 = s.ipv6_address
       private_ip  = local.nodes[k].private_ip
+      volume_id   = try(hcloud_volume.this[k].id, null)
     }
   }
 }
@@ -63,4 +64,17 @@ output "placement_group_ids" {
 output "ssh_keys" {
   description = "Names of every SSH key injected into the servers: ssh_key_names as given, then the keys created from ssh_public_keys (<name>-<key>)."
   value       = local.ssh_keys
+}
+
+output "inventory" {
+  description = "Ansible YAML inventory (ADR-0002): group kafka with one host per server (ansible_host = public IPv4, ansible_user = root, kafka_node_id, kafka_node_roles, kafka_node_ip = private IP), group var kafka_axonops_cluster_name, and child groups kafka_brokers / kafka_controllers. Contains no secrets."
+  value = templatefile("${path.module}/templates/inventory.yaml.tftpl", {
+    cluster_name = var.name
+    inventory    = local.inventory
+  })
+}
+
+output "bootstrap_servers" {
+  description = "Comma-separated Kafka bootstrap servers (<private_ip>:9092) of every node with the broker role, ordered by node ID. Reachable from the private network only."
+  value       = local.bootstrap_servers
 }

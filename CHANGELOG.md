@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - `LOCK` Makefile variable (default `true`); set `LOCK=false` if Object Storage conditional-write locking is unsupported
 
 ### Changed
+- Test mock providers pin numeric ids for `hcloud_volume` and `hcloud_server` (consumed by `hcloud_volume_attachment`) (#9)
+- CI path filter includes `**/*.tftpl` and `modules/**/*.sh` (#9)
 - `image` input is now wired into `hcloud_server` (tflint ignore removed) (#8)
 - Test mock providers pin numeric ids for `hcloud_firewall` and `hcloud_placement_group` (#8)
 - Makefile retargeted to Hetzner: `LOCATION` (default `fsn1`) replaces `REGION`; params at `params/$(LOCATION)/$(ENVIRONMENT)/`; `prep` passes `-backend-config=.../backend.hcl`; tofu runs in `TF_DIR` (default `examples/complete`)

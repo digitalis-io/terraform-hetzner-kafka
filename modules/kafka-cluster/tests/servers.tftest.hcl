@@ -65,7 +65,7 @@ run "combined_cluster_servers" {
 
   assert {
     condition     = alltrue([for s in hcloud_server.this : s.image == "ubuntu-24.04" && s.location == "fsn1" && s.user_data == null])
-    error_message = "Servers must use var.image, var.location and no user_data yet."
+    error_message = "Servers must use var.image, var.location and no user_data without volumes."
   }
 
   assert {
