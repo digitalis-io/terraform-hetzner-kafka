@@ -3,10 +3,17 @@
 # resources, nothing to clean up. Runs are independent and order-free.
 
 mock_provider "hcloud" {
-  # hcloud_network.id is a numeric string; the generated mock id is random
-  # text, which hcloud_network_subnet.network_id (a number) rejects.
+  # These ids are numeric strings; the generated mock id is random text, which
+  # the numeric arguments that consume them (hcloud_network_subnet.network_id,
+  # hcloud_server.network_id / firewall_ids / placement_group_id) reject.
   mock_resource "hcloud_network" {
     defaults = { id = "1001" }
+  }
+  mock_resource "hcloud_firewall" {
+    defaults = { id = "2001" }
+  }
+  mock_resource "hcloud_placement_group" {
+    defaults = { id = "3001" }
   }
 }
 

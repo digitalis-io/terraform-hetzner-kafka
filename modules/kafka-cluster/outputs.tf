@@ -41,3 +41,26 @@ output "firewall_id" {
   description = "ID of the public-interface firewall. Pass to hcloud_server.firewall_ids to apply it."
   value       = hcloud_firewall.this.id
 }
+
+output "servers" {
+  description = "Map of node key (broker-<n>, controller-<n>) to server attributes: id, name, public_ipv4, public_ipv6, private_ip."
+  value = {
+    for k, s in hcloud_server.this : k => {
+      id          = s.id
+      name        = s.name
+      public_ipv4 = s.ipv4_address
+      public_ipv6 = s.ipv6_address
+      private_ip  = local.nodes[k].private_ip
+    }
+  }
+}
+
+output "placement_group_ids" {
+  description = "Map of pool (broker, controller) to spread placement group ID. controller is present only when dedicated_controllers = true."
+  value       = { for k, pg in hcloud_placement_group.this : k => pg.id }
+}
+
+output "ssh_keys" {
+  description = "Names of every SSH key injected into the servers: ssh_key_names as given, then the keys created from ssh_public_keys (<name>-<key>)."
+  value       = local.ssh_keys
+}

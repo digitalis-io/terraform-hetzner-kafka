@@ -28,11 +28,9 @@ variable "network_zone" {
   }
 }
 
-# tflint-ignore: terraform_unused_declarations
 variable "image" {
-  # TODO(#8): consumed by hcloud_server.image when servers are added.
   type        = string
-  description = "Hetzner Cloud image name for every node."
+  description = "Hetzner Cloud image name for every node. Applied at creation only; later changes are ignored and do not rebuild servers."
   default     = "ubuntu-24.04"
 
   validation {
