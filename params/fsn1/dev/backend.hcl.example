@@ -1,0 +1,25 @@
+# Partial S3 backend config for Hetzner Object Storage (ADR-0006).
+# Copy to backend.hcl and set bucket/key. Requires OpenTofu >= 1.10.
+# Credentials are NOT stored here: export AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY (Hetzner Object Storage S3 credentials).
+#
+# Locking: use_lockfile relies on S3 conditional writes (If-None-Match).
+# Hetzner Object Storage support for this is UNVERIFIED. If init/plan fails
+# on lock acquisition, run make with LOCK=false and rely on the CI
+# concurrency group to serialise runs.
+
+bucket = "my-tofu-state"
+key    = "terraform-hetzner-kafka/fsn1/dev/terraform.tfstate"
+region = "fsn1"
+
+endpoints = {
+  s3 = "https://fsn1.your-objectstorage.com"
+}
+
+use_lockfile                = true
+use_path_style              = true
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_requesting_account_id  = true
+skip_s3_checksum            = true
+skip_metadata_api_check     = true

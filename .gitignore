@@ -1,11 +1,14 @@
 .terraform/
-.terraform.lock.hcl
+modules/**/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan
 tfplan
 plan.out
 tf_exit_code
+compliance.plan
+*.plan.json
+inventory.yml
 crash.log
 crash.*.log
 override.tf
@@ -17,3 +20,5 @@ override.tf.json
 *.swp
 *~
 .DS_Store
+.env
+.env.*

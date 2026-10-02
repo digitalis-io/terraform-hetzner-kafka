@@ -8,26 +8,6 @@ plugin "terraform" {
   preset  = "recommended"
 }
 
-# Uncomment and configure the provider plugin for your primary cloud:
-
-# plugin "aws" {
-#   enabled = true
-#   version = "0.36.0"
-#   source  = "github.com/terraform-linters/tflint-ruleset-aws"
-# }
-
-# plugin "azurerm" {
-#   enabled = true
-#   version = "0.27.0"
-#   source  = "github.com/terraform-linters/tflint-ruleset-azurerm"
-# }
-
-# plugin "google" {
-#   enabled = true
-#   version = "0.29.0"
-#   source  = "github.com/terraform-linters/tflint-ruleset-google"
-# }
-
 rule "terraform_naming_convention" {
   enabled = true
 }

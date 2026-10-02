@@ -1,0 +1,4 @@
+# Example variables for location fsn1, environment dev.
+# Copy to params.tfvars. No secrets: HCLOUD_TOKEN is read from the environment.
+# `location` and `environment` are passed by the Makefile via -var.
+# Module inputs are added with examples/complete (tickets #6 and #12).
