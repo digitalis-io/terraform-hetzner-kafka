@@ -1,0 +1,5 @@
+---
+# Runs the real site.yml unmodified with the security group_vars from
+# molecule.yml (#14).
+- name: Converge
+  ansible.builtin.import_playbook: ../../site.yml

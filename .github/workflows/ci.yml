@@ -182,15 +182,31 @@ jobs:
       - run: yamllint -c .yamllint .
       - run: ansible-playbook -i tests/inventory.yml site.yml --syntax-check
       - run: ansible-playbook -i tests/inventory.yml smoke-test.yml --syntax-check
+      - run: ansible-playbook -i tests/inventory.yml certs.yml --syntax-check
       - run: ANSIBLE_INVENTORY=tests/inventory.yml ansible-lint --profile production
       - name: Inventory-contract edge-case assertions (localhost, no Docker needed)
         run: ansible-playbook -i localhost, tests/assert-inventory-contract.yml
+      - name: Security pre-flight edge-case assertions (localhost, no Docker needed)
+        run: ansible-playbook -i localhost, tests/assert-security-prereqs.yml
+      # Real CA + host certs for the fake inventory, twice: the second run
+      # must change nothing (scale-out keeps the existing CA).
+      - name: make certs is idempotent
+        run: |
+          ansible-playbook -i tests/inventory.yml certs.yml -e kafka_tls_certs_dir="$RUNNER_TEMP/tls"
+          ansible-playbook -i tests/inventory.yml certs.yml -e kafka_tls_certs_dir="$RUNNER_TEMP/tls" | tee "$RUNNER_TEMP/certs2.log"
+          grep -Eq 'changed=[1-9]' "$RUNNER_TEMP/certs2.log" && { echo "certs.yml is not idempotent"; exit 1; } || true
+          openssl verify -CAfile "$RUNNER_TEMP/tls/ca.crt" "$RUNNER_TEMP/tls/kafka-dev-broker-1.crt"
 
   molecule:
-    name: molecule (3 combined nodes, converge + idempotence + smoke test)
+    name: molecule ${{ matrix.scenario }} (3 combined nodes, converge + idempotence + smoke test)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs: ansible-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        # default: PLAINTEXT. secure: TLS + SASL/SCRAM + ACLs (#14).
+        scenario: [default, secure]
     defaults:
       run:
         working-directory: ansible
@@ -207,7 +223,7 @@ jobs:
       - run: ansible-galaxy collection install -r requirements.yml -p ~/.ansible/collections
       # Test-only: molecule's docker driver playbooks use community.docker.
       - run: ansible-galaxy collection install "community.docker:>=3.0.0,<5.0.0" -p ~/.ansible/collections
-      - run: molecule test
+      - run: molecule test -s ${{ matrix.scenario }}
         env:
           PY_COLORS: "1"
           ANSIBLE_FORCE_COLOR: "1"

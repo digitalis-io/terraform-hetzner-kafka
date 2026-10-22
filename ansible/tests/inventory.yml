@@ -1,0 +1,37 @@
+---
+# Fake 3-node inventory for --syntax-check and ansible-lint in CI. Same
+# shape as the OpenTofu-rendered inventory (ADR-0002). Not a real cluster:
+# 192.0.2.0/24 is a documentation range.
+kafka:
+  children:
+    kafka_brokers:
+      hosts:
+        kafka-dev-broker-1: {}
+        kafka-dev-broker-2: {}
+        kafka-dev-broker-3: {}
+    kafka_controllers:
+      hosts:
+        kafka-dev-broker-1: {}
+        kafka-dev-broker-2: {}
+        kafka-dev-broker-3: {}
+  hosts:
+    kafka-dev-broker-1:
+      ansible_host: 192.0.2.10
+      ansible_user: root
+      kafka_node_id: 1
+      kafka_node_ip: 10.0.1.10
+      kafka_node_roles: [broker, controller]
+    kafka-dev-broker-2:
+      ansible_host: 192.0.2.11
+      ansible_user: root
+      kafka_node_id: 2
+      kafka_node_ip: 10.0.1.11
+      kafka_node_roles: [broker, controller]
+    kafka-dev-broker-3:
+      ansible_host: 192.0.2.12
+      ansible_user: root
+      kafka_node_id: 3
+      kafka_node_ip: 10.0.1.12
+      kafka_node_roles: [broker, controller]
+  vars:
+    kafka_axonops_cluster_name: kafka-dev

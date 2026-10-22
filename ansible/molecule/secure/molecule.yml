@@ -1,0 +1,119 @@
+---
+# Secure variant of molecule/default (#14, ADR-0008): 3 combined nodes with
+# TLS, SASL/SCRAM-SHA-512 and ACLs on. TLS uses the role's `generate` mode
+# (throwaway CA on the control node), which is fine for disposable
+# containers; real clusters use `make certs` (custom mode).
+#
+# The passwords below are fixed test fixtures for throwaway containers,
+# not secrets. Real clusters keep them in group_vars/kafka/vault.yml.
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../requirements.yml
+driver:
+  name: docker
+platforms:
+  - name: kafka-secure-1
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+  - name: kafka-secure-2
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+  - name: kafka-secure-3
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    # Empty command keeps the image's systemd entrypoint (the driver would
+    # otherwise run a sleep loop and services could not start).
+    command: ""
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    groups:
+      - kafka
+      - kafka_brokers
+      - kafka_controllers
+provisioner:
+  name: ansible
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    group_vars:
+      all:
+        kafka_start_on_install: true
+        kafka_start_on_boot: false
+        kafka_java_install: true
+        kafka_axonops_agent_enabled: false
+        # Containers share the CI runner's kernel and see its swap; Hetzner
+        # images have none, so the check stays on for real runs.
+        preflight_check_swap: false
+        # --- #14 security ---
+        kafka_security_enabled: true
+        kafka_tls_enabled: true
+        kafka_tls_mode: generate
+        kafka_tls_generate_local_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/kafka-tls"
+        kafka_tls_client_auth: none
+        kafka_sasl_enabled: true
+        kafka_sasl_mechanism: SCRAM-SHA-512
+        kafka_sasl_inter_broker_user: kafka-admin
+        kafka_sasl_inter_broker_password: molecule-fixture-admin-0001
+        # app1 has no ACLs: smoke-test.yml checks it is denied by default.
+        kafka_sasl_users:
+          - name: app1
+            password: molecule-fixture-app1-0001
+        kafka_acl_enabled: true
+        kafka_acl_allow_everyone_if_no_acl: false
+        # One rule on the app1. prefix: exercises the role's ACL task (and its
+        # idempotence). app1 still has no ACL on the smoke-test topic, so
+        # smoke-test.yml's deny-by-default check holds.
+        kafka_acls:
+          - {principal: "User:app1", operation: Write, resource_type: Topic, resource_name: "app1.", pattern_type: PREFIXED}
+    host_vars:
+      # kafka_node_ip templates against the container's own facts (Ansible
+      # evaluates host_vars Jinja per host at inventory-parse time) since
+      # Docker containers' IPs aren't known until they're created.
+      kafka-secure-1:
+        kafka_node_id: 1
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+      kafka-secure-2:
+        kafka_node_id: 2
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+      kafka-secure-3:
+        kafka_node_id: 3
+        kafka_node_roles: [broker, controller]
+        kafka_node_ip: "{{ ansible_default_ipv4.address }}"
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - destroy
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

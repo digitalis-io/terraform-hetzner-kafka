@@ -105,9 +105,18 @@ $EDITOR params/fsn1/dev/params.tfvars
 make plan  ENVIRONMENT=dev LOCATION=fsn1
 make apply ENVIRONMENT=dev LOCATION=fsn1
 
-# 4. Kafka
-make galaxy configure smoke-test
+# 4. Kafka settings and secrets (TLS + SASL/SCRAM + ACLs on)
+cp ansible/group_vars/kafka/vars.yml.example  ansible/group_vars/kafka/vars.yml
+cp ansible/group_vars/kafka/vault.yml.example ansible/group_vars/kafka/vault.yml
+$EDITOR ansible/group_vars/kafka/vault.yml          # replace every CHANGE_ME
+ansible-vault encrypt ansible/group_vars/kafka/vault.yml
+
+# 5. Kafka (asks for the Vault password unless ANSIBLE_VAULT_PASSWORD_FILE is set)
+make galaxy certs configure smoke-test
 ```
+
+Skipping step 4 gives a PLAINTEXT cluster with no authentication. Use that
+for quick tests only.
 
 `make apply` costs money. The default example creates 3 `cpx32` servers and
 three 20 GB volumes.
@@ -194,8 +203,9 @@ OpenTofu targets), `LOCATION` (default `fsn1`), `TF_DIR` (default
 | `inventory` | Re-render `inventory.yml` from state (`tofu output -raw inventory`), no apply |
 | `galaxy` | `ansible-galaxy collection install -r ansible/requirements.yml` |
 | `ping` | `ansible -m ping` against group `kafka` |
+| `certs` | Create the TLS CA and per-host certificates in `ansible/tls/` (`ansible/certs.yml`); re-run after a scale-out |
 | `configure` | `ansible-playbook -i inventory.yml ansible/site.yml` |
-| `smoke-test` | `ansible-playbook -i inventory.yml ansible/smoke-test.yml` |
+| `smoke-test` | `ansible-playbook -i inventory.yml ansible/smoke-test.yml`; with security on, also checks that a client without credentials is refused |
 | `test` | terraform-compliance against a `-refresh=false` plan (local backend, no apply) |
 | `module-test` | `tofu test` suites for `modules/kafka-cluster` (mocked provider) |
 | `cloud-init-test` | Test the volume mount script with stubbed tools |
@@ -205,7 +215,10 @@ OpenTofu targets), `LOCATION` (default `fsn1`), `TF_DIR` (default
 Ansible targets use `ANSIBLE_CONFIG=ansible/ansible.cfg`. `ping`, `configure`
 and `smoke-test` fail with `run make apply or make inventory first` when
 `inventory.yml` is missing. Pass extra Ansible flags with
-`ANSIBLE_OPTS="--limit kafka_controllers"`.
+`ANSIBLE_OPTS="--limit kafka_controllers"`. `configure` and `smoke-test` read
+the Vault password from `ANSIBLE_VAULT_PASSWORD_FILE` when it is set;
+otherwise they add `--ask-vault-pass` when `ansible/group_vars/kafka/vault.yml`
+is encrypted.
 
 ## Configuration reference
 
@@ -292,10 +305,15 @@ Deleting a volume deletes its Kafka data permanently.
 
 ### Security
 
-- Kafka uses **PLAINTEXT** listeners on the private network in this release.
-  TLS and SASL/SCRAM are planned. Do not route untrusted clients into the
-  network. Need encryption and authentication now?
-  [Digitalis can enable them for you](https://digitalis.io/contact).
+- The example configuration turns on **TLS, SASL/SCRAM-SHA-512 and ACLs**:
+  every Kafka listener is `SASL_SSL`, and clients get nothing until an ACL
+  grants it. Run `make certs` before `make configure`, and keep passwords in
+  `ansible/group_vars/kafka/vault.yml`, encrypted with Ansible Vault. Details:
+  [ansible/README.md](ansible/README.md#security-14) and
+  [ADR-0008](docs/adr/0008-kafka-tls-certificate-source.md).
+- Security must be on from the first `make configure`. Converting a running
+  PLAINTEXT cluster is a manual migration.
+  [Digitalis can do it for you](https://digitalis.io/contact).
 - The public firewall opens only SSH (22/tcp) and, optionally, ICMP from
   `ssh_allowed_cidrs`. Kafka ports 9092/9093 are never public.
 - Hetzner firewalls do not filter private network traffic; anything in the
@@ -341,7 +359,7 @@ make plan apply ENVIRONMENT=dev LOCK=false
 | `modules/kafka-cluster/` | Reusable module ([README](modules/kafka-cluster/README.md)) |
 | `examples/complete/` | Root configuration used by the Makefile |
 | `params/<location>/<env>/` | `params.tfvars` and `backend.hcl` per environment (`.example` templates committed) |
-| `ansible/` | `ansible.cfg`, `requirements.yml`, `site.yml`, `smoke-test.yml`, `group_vars/` |
+| `ansible/` | `ansible.cfg`, `requirements.yml`, `site.yml`, `smoke-test.yml`, `certs.yml`, `group_vars/kafka/` |
 | `tests/compliance/features/` | Gherkin specs: terraform-compliance policies and `@tofu-test` specs |
 | `docs/` | [Architecture](docs/architecture.md) and ADRs |
 

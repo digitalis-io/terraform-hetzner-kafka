@@ -3,7 +3,11 @@
 # performed in this environment; syntax-checked only. Runs in CI.
 - name: "Scenario: Configure combined cluster — kafka.service active on all 3 hosts"
   hosts: all
-  gather_facts: false
+  # Gather facts: molecule.yml templates kafka_node_ip from
+  # ansible_default_ipv4, and smoke-test.yml (gather_facts: false) reads
+  # every broker's kafka_node_ip through hostvars. Without facts in this
+  # run it got the raw "{{ ansible_default_ipv4.address }}" string.
+  gather_facts: true
   tasks:
     - name: Check kafka.service is active
       ansible.builtin.systemd:

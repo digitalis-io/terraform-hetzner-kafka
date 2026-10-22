@@ -22,3 +22,5 @@ Create `hcloud_network` + subnet; every node gets a deterministic private IP. Ka
 Clients must be inside the Hetzner network. Compliance test asserts no public rule for 9092/9093.
 
 The role opens 9092/9093 in ufw/firewalld only if one is active (`kafka_configure_firewall`). Hetzner Ubuntu images have neither active, so the Hetzner firewall is the only public control. Private IPs avoid the subnet gateway: assign with `cidrhost(subnet_cidr, 10 + index)`.
+
+Amended by ADR-0008: with the example security settings, listeners are SASL_SSL instead of PLAINTEXT.
